@@ -10,7 +10,113 @@
     <main class="container py-5">
         <h1>REDXela</h1>
         <p class="text-secondary">Centro de distribución y simulación logística</p>
-        <div class="alert alert-success">Spring Boot, Thymeleaf y Bootstrap funcionan correctamente.</div>
+        <div th:if="${receiptMessage}" class="alert alert-info" role="alert">
+            <strong th:text="${receiptStatus}">Resultado</strong>: <span th:text="${receiptMessage}">Mensaje</span>
+        </div>
+        <section class="row g-3 mb-4">
+            <div class="col-md-4"><div class="card h-100"><div class="card-body">
+                <h2 class="h5">Estado del sistema</h2>
+                <p class="mb-1">Pedidos registrados: <strong th:text="${orderCount}">0</strong></p>
+                <p class="mb-0">Pedidos activos: <strong th:text="${activeOrderCount}">0</strong></p>
+            </div></div></div>
+            <div class="col-md-4"><div class="card h-100"><div class="card-body">
+                <h2 class="h5">Almacén</h2>
+                <p th:text="|Existencias: ${storedUnits} / ${warehouseCapacity} unidades|">Capacidad</p>
+                <p class="mb-0" th:text="|Ubicaciones físicas: ${#lists.size(locations)}|">Ubicaciones</p>
+            </div></div></div>
+            <div class="col-md-4"><div class="card h-100"><div class="card-body">
+                <h2 class="h5">Fundación</h2>
+                <p class="mb-0">El estado inicial es en memoria; la simulación aún no está activa.</p>
+            </div></div></div>
+        </section>
+        <section class="row g-3 mb-4">
+            <div class="col-lg-5">
+                <div class="card h-100"><div class="card-body">
+                    <h2 class="h4">Registrar recepción</h2>
+                    <form method="post" th:action="@{/receipts}" class="vstack gap-3">
+                        <div><label class="form-label" for="productCode">Código de producto</label>
+                            <input class="form-control" id="productCode" name="productCode" required maxlength="40"></div>
+                        <div><label class="form-label" for="merchandiseTypeCode">Tipo de mercancía</label>
+                            <select class="form-select" id="merchandiseTypeCode" name="merchandiseTypeCode" required>
+                                <option th:each="type : ${merchandiseTypes}" th:value="${type.code}" th:text="${type.name}"></option>
+                            </select></div>
+                        <div><label class="form-label" for="quantity">Unidades recibidas</label>
+                            <input class="form-control" type="number" id="quantity" name="quantity" min="1" required></div>
+                        <button class="btn btn-primary" type="submit">Enviar a inventario</button>
+                    </form>
+                </div></div>
+            </div>
+            <div class="col-lg-7">
+                <div class="card h-100"><div class="card-body">
+                    <h2 class="h4">Inventario por ubicación</h2>
+                    <p th:text="|Recepciones pendientes: ${pendingReceipts}|">Pendientes</p>
+                    <div class="table-responsive"><table class="table table-sm">
+                        <thead><tr><th>Ubicación</th><th>Unidades ocupadas</th></tr></thead>
+                        <tbody><tr th:each="entry : ${locationStock}">
+                            <td th:text="${entry.key}">A-01</td><td th:text="${entry.value}">0</td>
+                        </tr></tbody>
+                    </table></div>
+                </div></div>
+            </div>
+        </section>
+        <section class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Lotes almacenados</h2>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Producto</th><th>Mercancía</th><th>Unidades</th><th>Ubicaciones asignadas</th></tr></thead>
+                    <tbody><tr th:each="lot : ${lots}">
+                        <td th:text="${lot.productCode}">Producto</td>
+                        <td th:text="${lot.merchandiseTypeCode}">Tipo</td>
+                        <td th:text="${lot.quantity}">0</td>
+                        <td><span th:each="allocation, iter : ${lot.allocations}">
+                            <span th:text="|${allocation.key.code}: ${allocation.value}|">Asignación</span><span th:if="${!iter.last}">, </span>
+                        </span></td>
+                    </tr><tr th:if="${#lists.isEmpty(lots)}"><td colspan="4" class="text-secondary">Aún no hay lotes.</td></tr></tbody>
+                </table></div>
+            </div>
+        </section>
+        <section class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Resultado de recepciones</h2>
+                <div class="table-responsive"><table class="table table-sm mb-0">
+                    <thead><tr><th>Recibo</th><th>Resultado</th><th>Aceptadas</th><th>Detalle</th></tr></thead>
+                    <tbody><tr th:each="result : ${receiptResults}">
+                        <td th:text="${result.receiptId}">ID</td><td th:text="${result.status.displayName}">Estado</td>
+                        <td th:text="${result.acceptedUnits}">0</td><td th:text="${result.message}">Detalle</td>
+                    </tr><tr th:if="${#lists.isEmpty(receiptResults)}"><td colspan="4" class="text-secondary">Sin recepciones procesadas.</td></tr></tbody>
+                </table></div>
+            </div>
+        </section>
+        <section class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Recursos compartidos</h2>
+                <div class="table-responsive">
+                    <table class="table table-striped mb-0">
+                        <thead><tr><th>Recurso</th><th>Capacidad</th><th>Estado</th></tr></thead>
+                        <tbody><tr th:each="resource : ${resources}">
+                            <td th:text="${resource.name}">Recurso</td>
+                            <td th:text="${resource.capacity}">0</td>
+                            <td>Disponible (simulación pendiente)</td>
+                        </tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+        <section class="card">
+            <div class="card-body">
+                <h2 class="h4">Tipos de mercancía</h2>
+                <div class="table-responsive">
+                    <table class="table table-striped mb-0">
+                        <thead><tr><th>Tipo</th><th>Características</th><th>Recursos requeridos</th></tr></thead>
+                        <tbody><tr th:each="type : ${merchandiseTypes}">
+                            <td th:text="${type.name}">Tipo</td>
+                            <td th:text="${type.description}">Descripción</td>
+                            <td th:text="${#strings.listJoin(type.requiredResourceCodes, ', ')}">Recursos</td>
+                        </tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
     </main>
 </body>
 </html>
