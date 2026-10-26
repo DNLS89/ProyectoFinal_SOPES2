@@ -13,11 +13,15 @@
         <div th:if="${receiptMessage}" class="alert alert-info" role="alert">
             <strong th:text="${receiptStatus}">Resultado</strong>: <span th:text="${receiptMessage}">Mensaje</span>
         </div>
+        <div th:if="${orderMessage}" class="alert alert-info" role="alert" th:text="${orderMessage}">Resultado del pedido</div>
         <section class="row g-3 mb-4">
             <div class="col-md-4"><div class="card h-100"><div class="card-body">
                 <h2 class="h5">Estado del sistema</h2>
-                <p class="mb-1">Pedidos registrados: <strong th:text="${orderCount}">0</strong></p>
-                <p class="mb-0">Pedidos activos: <strong th:text="${activeOrderCount}">0</strong></p>
+                <p class="mb-1">Pedidos registrados: <strong th:text="${orderStatistics.totalOrders}">0</strong></p>
+                <p class="mb-1">En cola: <strong th:text="${orderStatistics.queuedOrders}">0</strong></p>
+                <p class="mb-1">Esperando inventario: <strong th:text="${orderStatistics.waitingForStock}">0</strong></p>
+                <p class="mb-1">Unidades solicitadas: <strong th:text="${orderStatistics.totalUnits}">0</strong></p>
+                <p class="mb-0">Demora media hasta entrar a cola (s): <strong th:text="${#numbers.formatDecimal(orderStatistics.averageQueueEntryDelaySeconds, 1, 1)}">0.0</strong></p>
             </div></div></div>
             <div class="col-md-4"><div class="card h-100"><div class="card-body">
                 <h2 class="h5">Almacén</h2>
@@ -28,6 +32,70 @@
                 <h2 class="h5">Fundación</h2>
                 <p class="mb-0">El estado inicial es en memoria; la simulación aún no está activa.</p>
             </div></div></div>
+        </section>
+        <section class="row g-3 mb-4">
+            <div class="col-lg-8">
+                <div class="card h-100"><div class="card-body">
+                    <h2 class="h4">Crear pedido</h2>
+                    <form method="post" th:action="@{/orders}" class="vstack gap-3">
+                        <div class="row g-2">
+                            <div class="col-md-6"><label for="customerName" class="form-label">Cliente</label><input class="form-control" id="customerName" name="customerName" required maxlength="100"></div>
+                            <div class="col-md-6"><label for="email" class="form-label">Correo electrónico</label><input class="form-control" type="email" id="email" name="email" required></div>
+                        </div>
+                        <div><label for="serviceLevel" class="form-label">Nivel de servicio</label>
+                            <select class="form-select" id="serviceLevel" name="serviceLevel" required>
+                                <option th:each="level : ${serviceLevels}" th:value="${level.name()}" th:text="|${level.level} - ${level.displayName}|"></option>
+                            </select></div>
+                        <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+                            <thead><tr><th>Código</th><th>Producto</th><th>Mercancía</th><th>Unidades</th></tr></thead>
+                            <tbody id="orderLines"><tr>
+                                <td><input class="form-control" name="productCodes" required maxlength="40"></td>
+                                <td><input class="form-control" name="productNames" required maxlength="100"></td>
+                                <td><select class="form-select" name="merchandiseTypeCodes" required><option th:each="type : ${merchandiseTypes}" th:value="${type.code}" th:text="${type.name}"></option></select></td>
+                                <td><input class="form-control" type="number" name="quantities" min="1" value="1" required></td>
+                            </tr></tbody>
+                        </table></div>
+                        <div class="d-flex gap-2"><button class="btn btn-outline-secondary" type="button" onclick="addOrderLine()">Agregar producto</button>
+                            <button class="btn btn-primary" type="submit">Registrar pedido</button></div>
+                    </form>
+                </div></div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card mb-3"><div class="card-body">
+                    <h2 class="h5">Generador automático</h2>
+                    <p th:text="${generatorRunning} ? 'Activo' : 'Detenido'">Detenido</p>
+                    <form method="post" th:action="@{/generator/start}" class="d-flex gap-2 mb-2">
+                        <input class="form-control" type="number" min="1" max="3600" name="intervalSeconds" th:value="${generatorInterval}" aria-label="Intervalo en segundos" required>
+                        <button class="btn btn-success" type="submit">Iniciar</button>
+                    </form>
+                    <form method="post" th:action="@{/generator/stop}"><button class="btn btn-outline-danger" type="submit">Detener</button></form>
+                </div></div>
+                <div class="card"><div class="card-body">
+                    <h2 class="h5">Política de cola</h2>
+                    <form method="post" th:action="@{/orders/policy}" class="d-flex gap-2">
+                        <select class="form-select" name="policy">
+                            <option th:each="policy : ${queuePolicies}" th:value="${policy.name()}" th:text="${policy.displayName}" th:selected="${policy == queuePolicy}"></option>
+                        </select><button class="btn btn-outline-primary" type="submit">Aplicar</button>
+                    </form>
+                </div></div>
+            </div>
+        </section>
+        <section class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Cola de pedidos</h2>
+                <p th:text="|Ordenada por: ${queuePolicy.displayName}|">Política</p>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Pedido</th><th>Cliente</th><th>Servicio</th><th>Unidades</th><th>Estado</th><th>En cola desde</th></tr></thead>
+                    <tbody><tr th:each="order : ${waitingQueue}">
+                        <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
+                        <td th:text="${order.serviceLevel.displayName}">Servicio</td><td th:text="${order.totalUnits}">0</td>
+                        <td th:text="${order.status.displayName}">Estado</td><td th:text="${order.queueEnteredAt}">Fecha</td>
+                    </tr><tr th:if="${#lists.isEmpty(waitingQueue)}"><td colspan="6" class="text-secondary">La cola está vacía.</td></tr></tbody>
+                </table></div>
+                <h3 class="h5 mt-4">Esperando inventario</h3>
+                <ul class="mb-0"><li th:each="order : ${stockWaitOrders}" th:text="|${order.id} — ${order.customer.name}, ${order.totalUnits} unidades|">Pedido</li>
+                    <li th:if="${#lists.isEmpty(stockWaitOrders)}" class="text-secondary">No hay pedidos esperando existencias.</li></ul>
+            </div>
         </section>
         <section class="row g-3 mb-4">
             <div class="col-lg-5">
@@ -118,5 +186,13 @@
             </div>
         </section>
     </main>
+    <script>
+        function addOrderLine() {
+            const first = document.querySelector('#orderLines tr');
+            const row = first.cloneNode(true);
+            row.querySelectorAll('input').forEach(input => input.value = input.name === 'quantities' ? '1' : '');
+            document.getElementById('orderLines').appendChild(row);
+        }
+    </script>
 </body>
 </html>

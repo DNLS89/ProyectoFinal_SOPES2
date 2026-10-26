@@ -2,10 +2,15 @@ package com.sopes.api.controller;
 
 import com.sopes.api.model.ReceiptRequest;
 import com.sopes.api.model.ReceiptResult;
+import com.sopes.api.model.QueuePolicy;
+import com.sopes.api.model.ServiceLevel;
 import com.sopes.api.service.InventoryService;
 import com.sopes.api.service.MerchandiseCatalog;
+import com.sopes.api.service.OrderGeneratorService;
+import com.sopes.api.service.OrderIntakeService;
 import com.sopes.api.service.ReceivingService;
 import com.sopes.api.service.WarehouseConfiguration;
+import com.sopes.api.service.WaitingOrderService;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -20,17 +25,26 @@ public class DashboardController {
     private final WarehouseConfiguration warehouseConfiguration;
     private final InventoryService inventoryService;
     private final ReceivingService receivingService;
+    private final WaitingOrderService orderService;
+    private final OrderIntakeService orderIntakeService;
+    private final OrderGeneratorService orderGeneratorService;
 
     public DashboardController(java.util.List<com.sopes.api.model.SharedResource> resources,
                               MerchandiseCatalog merchandiseCatalog,
                               WarehouseConfiguration warehouseConfiguration,
                               InventoryService inventoryService,
-                              ReceivingService receivingService) {
+                              ReceivingService receivingService,
+                              WaitingOrderService orderService,
+                              OrderIntakeService orderIntakeService,
+                              OrderGeneratorService orderGeneratorService) {
         this.resources = resources;
         this.merchandiseCatalog = merchandiseCatalog;
         this.warehouseConfiguration = warehouseConfiguration;
         this.inventoryService = inventoryService;
         this.receivingService = receivingService;
+        this.orderService = orderService;
+        this.orderIntakeService = orderIntakeService;
+        this.orderGeneratorService = orderGeneratorService;
     }
 
     @GetMapping("/")
@@ -39,8 +53,17 @@ public class DashboardController {
         model.addAttribute("merchandiseTypes", merchandiseCatalog.findAll());
         model.addAttribute("warehouseCapacity", warehouseConfiguration.getCapacityUnits());
         model.addAttribute("locations", warehouseConfiguration.findLocations());
-        model.addAttribute("orderCount", 0);
-        model.addAttribute("activeOrderCount", 0);
+        var statistics = orderService.statistics();
+        model.addAttribute("orderStatistics", statistics);
+        model.addAttribute("orderCount", statistics.totalOrders());
+        model.addAttribute("activeOrderCount", statistics.queuedOrders() + statistics.waitingForStock());
+        model.addAttribute("waitingQueue", orderService.findWaitingQueue());
+        model.addAttribute("stockWaitOrders", orderService.findWaitingForStock());
+        model.addAttribute("queuePolicy", orderService.getPolicy());
+        model.addAttribute("queuePolicies", QueuePolicy.values());
+        model.addAttribute("serviceLevels", ServiceLevel.values());
+        model.addAttribute("generatorRunning", orderGeneratorService.isRunning());
+        model.addAttribute("generatorInterval", orderGeneratorService.getIntervalSeconds());
         model.addAttribute("storedUnits", inventoryService.getStoredUnits());
         model.addAttribute("locationStock", inventoryService.stockByLocation());
         model.addAttribute("lots", inventoryService.findLots());
@@ -64,6 +87,58 @@ public class DashboardController {
             redirectAttributes.addFlashAttribute("receiptMessage", e.getMessage());
             redirectAttributes.addFlashAttribute("receiptStatus", "Datos inválidos");
         }
+        return "redirect:/";
+    }
+
+    @PostMapping("/orders")
+    public String submitOrder(@RequestParam String customerName,
+                              @RequestParam String email,
+                              @RequestParam String serviceLevel,
+                              @RequestParam java.util.List<String> productCodes,
+                              @RequestParam java.util.List<String> productNames,
+                              @RequestParam java.util.List<String> merchandiseTypeCodes,
+                              @RequestParam java.util.List<String> quantities,
+                              RedirectAttributes redirectAttributes) {
+        try {
+            ServiceLevel level = ServiceLevel.valueOf(serviceLevel);
+            java.util.List<Integer> units = new java.util.ArrayList<>();
+            for (int i = 0; i < productCodes.size(); i++) {
+                String raw = i < quantities.size() ? quantities.get(i) : "";
+                units.add(productCodes.get(i).isBlank() && raw.isBlank() ? 0 : Integer.parseInt(raw));
+            }
+            var order = orderIntakeService.create(customerName, email, level, productCodes, productNames,
+                    merchandiseTypeCodes, units);
+            redirectAttributes.addFlashAttribute("orderMessage", "Pedido " + order.id() + " creado: " + order.status().getDisplayName() + ".");
+        } catch (IllegalArgumentException e) {
+            redirectAttributes.addFlashAttribute("orderMessage", "No se creó el pedido: " + e.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/orders/policy")
+    public String setQueuePolicy(@RequestParam String policy, RedirectAttributes redirectAttributes) {
+        try {
+            orderService.setPolicy(QueuePolicy.valueOf(policy));
+        } catch (IllegalArgumentException e) {
+            redirectAttributes.addFlashAttribute("orderMessage", "Política no válida.");
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/generator/start")
+    public String startGenerator(@RequestParam String intervalSeconds, RedirectAttributes redirectAttributes) {
+        try {
+            orderGeneratorService.start(Integer.parseInt(intervalSeconds));
+            redirectAttributes.addFlashAttribute("orderMessage", "Generador iniciado.");
+        } catch (IllegalArgumentException e) {
+            redirectAttributes.addFlashAttribute("orderMessage", "No se pudo iniciar el generador: " + e.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/generator/stop")
+    public String stopGenerator() {
+        orderGeneratorService.stop();
         return "redirect:/";
     }
 }
