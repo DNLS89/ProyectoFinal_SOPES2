@@ -14,6 +14,7 @@
             <strong th:text="${receiptStatus}">Resultado</strong>: <span th:text="${receiptMessage}">Mensaje</span>
         </div>
         <div th:if="${orderMessage}" class="alert alert-info" role="alert" th:text="${orderMessage}">Resultado del pedido</div>
+        <div th:if="${conflictMessage}" class="alert alert-warning" role="alert" th:text="${conflictMessage}">Resultado del conflicto</div>
         <section class="row g-3 mb-4">
             <div class="col-md-4"><div class="card h-100"><div class="card-body">
                 <h2 class="h5">Estado del sistema</h2>
@@ -52,6 +53,48 @@
                 <ul class="mb-0"><li th:each="order, iter : ${completedOrders}" th:if="${iter.index < 10}"
                     th:text="|${order.id} — ${order.totalUnits} unidades, ${order.completedAt}|">Pedido</li>
                     <li th:if="${#lists.isEmpty(completedOrders)}" class="text-secondary">Aún no hay pedidos completados.</li></ul>
+            </div>
+        </section>
+        <section class="card border-warning mb-4">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                    <div>
+                        <h2 class="h4">Demostración de conflicto de recursos</h2>
+                        <p class="mb-1">Escenario aislado con semáforos propios; no detiene pedidos reales. Se cancela automáticamente en dos minutos.</p>
+                    </div>
+                    <form method="post" th:action="@{/conflict/start}">
+                        <button class="btn btn-warning" type="submit" th:disabled="${conflict.active}">Provocar conflicto</button>
+                    </form>
+                </div>
+                <div class="alert alert-secondary mt-3 mb-3" th:text="${conflict.message}">Estado del conflicto</div>
+                <div th:if="${conflict.operationA != null}">
+                    <p th:text="${conflict.explanation}">Explicación</p>
+                    <div class="table-responsive"><table class="table table-bordered align-middle">
+                        <thead><tr><th>Operación</th><th>Retiene</th><th>Solicita</th><th>Estado</th></tr></thead>
+                        <tbody>
+                            <tr><td th:text="${conflict.operationA.name}">Operación A</td>
+                                <td th:text="${conflict.operationA.holds}">Recurso</td><td th:text="${conflict.operationA.requests}">Recurso</td>
+                                <td th:text="${conflict.operationA.status}">Bloqueada</td></tr>
+                            <tr><td th:text="${conflict.operationB.name}">Operación B</td>
+                                <td th:text="${conflict.operationB.holds}">Recurso</td><td th:text="${conflict.operationB.requests}">Recurso</td>
+                                <td th:text="${conflict.operationB.status}">Bloqueada</td></tr>
+                        </tbody>
+                    </table></div>
+                    <div th:if="${conflict.active}" class="d-flex gap-2 flex-wrap">
+                        <form method="post" th:action="@{/conflict/resolve}">
+                            <input type="hidden" name="winner" value="A">
+                            <button class="btn btn-success" type="submit">Permitir que opere A</button>
+                        </form>
+                        <form method="post" th:action="@{/conflict/resolve}">
+                            <input type="hidden" name="winner" value="B">
+                            <button class="btn btn-success" type="submit">Permitir que opere B</button>
+                        </form>
+                        <form method="post" th:action="@{/conflict/cancel}">
+                            <button class="btn btn-outline-danger" type="submit">Cancelar escenario</button>
+                        </form>
+                    </div>
+                    <p class="small text-secondary mt-2 mb-0" th:if="${conflict.active}" th:text="|Vence: ${conflict.expiresAt}|">Vencimiento</p>
+                </div>
             </div>
         </section>
         <section class="row g-3 mb-4">

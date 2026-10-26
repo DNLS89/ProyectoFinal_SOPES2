@@ -54,6 +54,12 @@ public class SharedResourceService {
                 .toList();
     }
 
+    public String getName(String code) {
+        SharedResource resource = definitions.get(code);
+        if (resource == null) throw new IllegalArgumentException("Recurso sin configurar: " + code);
+        return resource.name();
+    }
+
     private void release(String orderId, List<String> codes) {
         for (int i = codes.size() - 1; i >= 0; i--) {
             String code = codes.get(i);

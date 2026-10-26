@@ -10,6 +10,7 @@ import com.sopes.api.service.OrderGeneratorService;
 import com.sopes.api.service.OrderIntakeService;
 import com.sopes.api.service.OrderProcessingService;
 import com.sopes.api.service.ReceivingService;
+import com.sopes.api.service.ResourceConflictService;
 import com.sopes.api.service.WarehouseConfiguration;
 import com.sopes.api.service.WaitingOrderService;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +30,7 @@ public class DashboardController {
     private final OrderIntakeService orderIntakeService;
     private final OrderGeneratorService orderGeneratorService;
     private final OrderProcessingService orderProcessingService;
+    private final ResourceConflictService conflictService;
 
     public DashboardController(MerchandiseCatalog merchandiseCatalog,
                               WarehouseConfiguration warehouseConfiguration,
@@ -37,7 +39,8 @@ public class DashboardController {
                               WaitingOrderService orderService,
                               OrderIntakeService orderIntakeService,
                               OrderGeneratorService orderGeneratorService,
-                              OrderProcessingService orderProcessingService) {
+                              OrderProcessingService orderProcessingService,
+                              ResourceConflictService conflictService) {
         this.merchandiseCatalog = merchandiseCatalog;
         this.warehouseConfiguration = warehouseConfiguration;
         this.inventoryService = inventoryService;
@@ -46,6 +49,7 @@ public class DashboardController {
         this.orderIntakeService = orderIntakeService;
         this.orderGeneratorService = orderGeneratorService;
         this.orderProcessingService = orderProcessingService;
+        this.conflictService = conflictService;
     }
 
     @GetMapping("/")
@@ -62,6 +66,7 @@ public class DashboardController {
                 .filter(order -> order.status() == com.sopes.api.model.OrderStatus.COMPLETED).toList());
         model.addAttribute("activeOrders", orderProcessingService.findActiveOrders());
         model.addAttribute("resourceStates", orderProcessingService.resourceSnapshot());
+        model.addAttribute("conflict", conflictService.snapshot());
         model.addAttribute("waitingQueue", orderService.findWaitingQueue());
         model.addAttribute("stockWaitOrders", orderService.findWaitingForStock());
         model.addAttribute("queuePolicy", orderService.getPolicy());
@@ -144,6 +149,35 @@ public class DashboardController {
     @PostMapping("/generator/stop")
     public String stopGenerator() {
         orderGeneratorService.stop();
+        return "redirect:/";
+    }
+
+    @PostMapping("/conflict/start")
+    public String startConflict(RedirectAttributes redirectAttributes) {
+        try {
+            var conflict = conflictService.trigger();
+            redirectAttributes.addFlashAttribute("conflictMessage", conflict.message());
+        } catch (RuntimeException e) {
+            redirectAttributes.addFlashAttribute("conflictMessage", "No se pudo iniciar el escenario: " + e.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/conflict/resolve")
+    public String resolveConflict(@RequestParam String winner, RedirectAttributes redirectAttributes) {
+        try {
+            var conflict = conflictService.resolve(winner);
+            redirectAttributes.addFlashAttribute("conflictMessage", conflict.message());
+        } catch (RuntimeException e) {
+            redirectAttributes.addFlashAttribute("conflictMessage", "No se pudo resolver el escenario: " + e.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/conflict/cancel")
+    public String cancelConflict(RedirectAttributes redirectAttributes) {
+        var conflict = conflictService.cancel();
+        redirectAttributes.addFlashAttribute("conflictMessage", conflict.message());
         return "redirect:/";
     }
 }
