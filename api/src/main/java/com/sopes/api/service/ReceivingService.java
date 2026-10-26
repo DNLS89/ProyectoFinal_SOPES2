@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/** Encola recepciones FIFO y las procesa en un consumidor separado del formulario web. */
 @Service
 public class ReceivingService {
     private static final int QUEUE_CAPACITY = 100;
@@ -47,26 +48,36 @@ public class ReceivingService {
     public synchronized ReceiptResult submit(ReceiptRequest request) {
         String id = "REC-" + UUID.randomUUID();
         if (!running.get()) {
-            return new ReceiptResult(id, ReceiptStatus.REJECTED, request.quantity(), 0,
+            ReceiptResult rejected = new ReceiptResult(id, ReceiptStatus.REJECTED, request.quantity(), 0,
                     "El servicio de recepción está detenido; el recibo no fue aceptado.", Instant.now(), java.util.Map.of());
+            addResult(rejected);
+            return rejected;
         }
         QueuedReceipt receipt = new QueuedReceipt(id, request);
+        ReceiptResult queued = new ReceiptResult(id, ReceiptStatus.QUEUED, request.quantity(), 0,
+                "Recibo aceptado en la cola FIFO para procesamiento.", null, java.util.Map.of());
+        // El registro provisional existe antes de que el consumidor pueda publicar el resultado final.
+        addResult(queued);
         try {
             // El tiempo acotado da oportunidad al consumidor y evita bloquear la respuesta web.
             if (!queue.offer(receipt, 250, TimeUnit.MILLISECONDS)) {
-                return new ReceiptResult(id, ReceiptStatus.REJECTED, request.quantity(), 0,
+                ReceiptResult rejected = new ReceiptResult(id, ReceiptStatus.REJECTED, request.quantity(), 0,
                         "Cola llena; el recibo no fue aceptado. Intente nuevamente.", Instant.now(), java.util.Map.of());
+                addResult(rejected);
+                return rejected;
             }
-            return new ReceiptResult(id, ReceiptStatus.QUEUED, request.quantity(), 0,
-                    "Recibo aceptado en la cola FIFO para procesamiento.", null, java.util.Map.of());
+            return queued;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new ReceiptResult(id, ReceiptStatus.REJECTED, request.quantity(), 0,
+            ReceiptResult rejected = new ReceiptResult(id, ReceiptStatus.REJECTED, request.quantity(), 0,
                     "Solicitud interrumpida antes de ser aceptada.", Instant.now(), java.util.Map.of());
+            addResult(rejected);
+            return rejected;
         }
     }
 
     private void consume() {
+        // FIFO conserva el orden de aceptación mientras el consumidor procesa a su propio ritmo.
         while (running.get() || !queue.isEmpty()) {
             try {
                 QueuedReceipt queued = queue.poll(200, TimeUnit.MILLISECONDS);
@@ -107,6 +118,7 @@ public class ReceivingService {
     }
 
     private void addResult(ReceiptResult result) {
+        recentResults.removeIf(existing -> existing.receiptId().equals(result.receiptId()));
         recentResults.add(0, result);
         while (recentResults.size() > RESULT_HISTORY_LIMIT) recentResults.remove(recentResults.size() - 1);
     }
@@ -122,6 +134,7 @@ public class ReceivingService {
     public synchronized void stop() {
         running.set(false);
         if (consumer == null) return;
+        // Se interrumpe la espera de cola y se espera que el consumidor registre o cierre su trabajo actual.
         consumer.interrupt();
         boolean interrupted = false;
         while (consumer.isAlive()) {

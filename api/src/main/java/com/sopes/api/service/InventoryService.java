@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/** Sincroniza existencias, reservas, lotes y ocupación de las ubicaciones. */
 @Service
 public class InventoryService {
     private final WarehouseConfiguration warehouse;
@@ -36,7 +37,7 @@ public class InventoryService {
     }
 
     public synchronized ReceiptResult store(ReceiptRequest request) {
-        // Un solo bloqueo mantiene alineados capacidad total, ocupación por ubicación y lotes creados.
+        // Un solo bloqueo mantiene alineados capacidad, ubicaciones y lotes incluso ante recepciones simultáneas.
         int accepted = Math.min(request.quantity(), warehouse.getCapacityUnits() - storedUnits);
         Map<WarehouseLocation, Integer> allocations = new LinkedHashMap<>();
         int remaining = accepted;

@@ -3,6 +3,7 @@ package com.sopes.api.model;
 import java.time.Instant;
 import java.util.List;
 
+/** Pedido con sus tiempos y estados para medir espera, avance y cumplimiento del servicio. */
 public record CustomerOrder(String id, Customer customer, ServiceLevel serviceLevel,
                             List<OrderLine> lines, OrderStatus status, Instant createdAt,
                             Instant queueEnteredAt, Instant statusChangedAt, Instant startedAt,
@@ -43,6 +44,7 @@ public record CustomerOrder(String id, Customer customer, ServiceLevel serviceLe
     }
 
     public CustomerOrder withProcessingStart(Instant start) {
+        // Se mide desde la entrada a la cola, no desde la creación si faltaba inventario.
         long waitNanos = Math.max(0, java.time.Duration.between(queueEnteredAt, start).toNanos());
         long wait = (waitNanos + 999_999_999L) / 1_000_000_000L;
         boolean met = wait <= serviceLevel.getTargetWaitMinutes() * 60L;

@@ -1,5 +1,6 @@
 package com.sopes.api.model;
 
+/** Estados de aceptación y procesamiento de un recibo. */
 public enum ReceiptStatus {
     QUEUED("En cola"), PARTIALLY_ACCEPTED("Aceptada parcialmente"), ACCEPTED("Aceptada"),
     REJECTED("Rechazada"), FAILED("Error de procesamiento");

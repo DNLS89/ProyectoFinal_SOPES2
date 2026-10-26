@@ -13,6 +13,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+/** Coordina el despacho concurrente, el uso de recursos y el cierre de los trabajadores. */
 @Service
 public class OrderProcessingService {
     private static final int WORKER_COUNT = 4;
@@ -46,6 +47,7 @@ public class OrderProcessingService {
     }
 
     private void dispatch() {
+        // El límite de tareas pendientes mantiene acotada la memoria si ingresan órdenes más rápido que el pool.
         while (running) {
             if (workers.getActiveCount() + workers.getQueue().size() >= WORKER_COUNT + MAX_PENDING_TASKS) {
                 pauseBriefly();
@@ -79,7 +81,7 @@ public class OrderProcessingService {
         SharedResourceService.Lease lease = null;
         boolean settled = false;
         try {
-            // La reserva de inventario ya se hizo al reclamar; los permisos cubren solo el trabajo activo.
+            // El stock se reserva al reclamar y los permisos se adquieren antes de iniciar el trabajo.
             lease = resources.acquire(claim.order());
             orders.markStarted(claim.order().id());
             long totalMillis = Math.max(1, claim.order().getTotalUnits()) * 500L;
@@ -127,6 +129,7 @@ public class OrderProcessingService {
         running = false;
         boolean interrupted = false;
         String failure = null;
+        // Se detiene primero el despachador para que no agregue tareas mientras cierran los workers.
         if (dispatcher != null) {
             dispatcher.interrupt();
             try {

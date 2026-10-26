@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 
+/** Genera pedidos de muestra en un hilo controlable y conserva sus errores recientes. */
 @Service
 public class OrderGeneratorService {
     private final OrderIntakeService intake;
@@ -62,6 +63,7 @@ public class OrderGeneratorService {
     public int getIntervalSeconds() { return intervalSeconds; }
 
     private void generateLoop() {
+        // El hilo espera entre pedidos y termina al recibir una interrupción de cierre.
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 Thread.sleep(intervalSeconds * 1000L);

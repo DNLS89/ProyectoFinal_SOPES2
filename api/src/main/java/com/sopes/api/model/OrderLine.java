@@ -1,5 +1,6 @@
 package com.sopes.api.model;
 
+/** Producto y cantidad solicitada junto con los recursos derivados de su mercancía. */
 public record OrderLine(String productCode, String productName, MerchandiseType merchandiseType, int quantity) {
     public OrderLine {
         if (productCode == null || productCode.isBlank() || productName == null || productName.isBlank()) {

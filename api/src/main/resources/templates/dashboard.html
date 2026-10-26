@@ -5,113 +5,124 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>REDXela</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        html { scroll-behavior: smooth; }
+        [id$="-section"] { scroll-margin-top: 1rem; }
+        .dashboard-sidebar { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
+        .dashboard-nav { display: grid; gap: .8rem; }
+        .dashboard-nav button { background: transparent; border: 0; border-radius: .35rem; color: #495057; display: block; padding: .4rem .6rem; text-align: left; width: 100%; }
+        .dashboard-nav button:hover, .dashboard-nav button.active { background: #e7f1ff; color: #0d6efd; font-weight: 600; }
+        @media (max-width: 991.98px) {
+            .dashboard-sidebar { position: fixed; inset: 0 0 auto; z-index: 1020; max-height: none; background: #f8f9fa; box-shadow: 0 .2rem .5rem #0002; }
+            .dashboard-nav { display: flex; gap: 1rem; overflow-x: auto; padding-bottom: .35rem; }
+            .dashboard-nav button { white-space: nowrap; width: auto; }
+            #dashboard-content { padding-top: 3.5rem; }
+        }
+    </style>
 </head>
 <body class="bg-light">
-    <main class="container py-5">
-        <h1>REDXela</h1>
-        <p class="text-secondary">Centro de distribución y simulación logística</p>
-        <div th:if="${receiptMessage}" class="alert alert-info" role="alert">
-            <strong th:text="${receiptStatus}">Resultado</strong>: <span th:text="${receiptMessage}">Mensaje</span>
-        </div>
-        <div th:if="${orderMessage}" class="alert alert-info" role="alert" th:text="${orderMessage}">Resultado del pedido</div>
-        <div th:if="${conflictMessage}" class="alert alert-warning" role="alert" th:text="${conflictMessage}">Resultado del conflicto</div>
-        <section class="row g-3 mb-4">
-            <div class="col-md-4"><div class="card h-100"><div class="card-body">
-                <h2 class="h5">Estado del sistema</h2>
-                <p class="mb-1">Pedidos registrados: <strong id="stat-total" th:text="${orderStatistics.totalOrders}">0</strong></p>
-                <p class="mb-1">Completados: <strong id="stat-completed" th:text="${orderStatistics.completedOrders}">0</strong></p>
-                <p class="mb-1">En cola: <strong id="stat-queued" th:text="${orderStatistics.queuedOrders}">0</strong></p>
-                <p class="mb-1">Esperando inventario: <strong id="stat-stock-wait" th:text="${orderStatistics.waitingForStock}">0</strong></p>
-                <p class="mb-1">Unidades solicitadas: <strong id="stat-units" th:text="${orderStatistics.totalUnits}">0</strong></p>
-                <p class="mb-1">Procesamiento medio (s): <strong id="stat-processing" th:text="${#numbers.formatDecimal(orderStatistics.averageProcessingSeconds, 1, 1)}">0.0</strong></p>
-                <p class="mb-1">Espera media hasta iniciar (s): <strong id="stat-wait" th:text="${#numbers.formatDecimal(orderStatistics.averageWaitSeconds, 1, 1)}">0.0</strong></p>
-                <p class="mb-0">Objetivos de espera cumplidos: <strong id="stat-sla" th:text="|${orderStatistics.waitTargetsMet} / ${orderStatistics.waitTargetsEvaluated}|">0 / 0</strong></p>
-            </div></div></div>
-            <div class="col-md-4"><div class="card h-100"><div class="card-body">
-                <h2 class="h5">Almacén</h2>
-                <p>Existencias: <span id="stored-units" th:text="${storedUnits}">0</span> / <span id="warehouse-capacity" th:text="${warehouseCapacity}">1000</span> unidades</p>
-                <p class="mb-0" th:text="|Ubicaciones físicas: ${#lists.size(locations)}|">Ubicaciones</p>
-            </div></div></div>
-            <div class="col-md-4"><div class="card h-100"><div class="card-body">
-                <h2 class="h5">Fundación</h2>
-                <p class="mb-0">El estado inicial es en memoria; la simulación aún no está activa.</p>
-            </div></div></div>
-        </section>
-        <section class="card mb-4">
-            <div class="card-body">
-                <h2 class="h4">Pedidos activos</h2>
-                <div class="table-responsive"><table class="table table-striped mb-0">
-                    <thead><tr><th>Pedido</th><th>Cliente</th><th>Unidades</th><th>Inicio</th><th>Progreso</th><th>Restante estimado</th><th>Objetivo de espera</th></tr></thead>
-                    <tbody id="active-order-rows"><tr th:each="order : ${activeOrders}">
-                        <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
-                        <td th:text="${order.totalUnits}">0</td><td th:text="${order.startedAt}">Inicio</td>
-                        <td><div class="progress" role="progressbar" th:attr="aria-valuenow=${order.progressPercent},aria-valuemin=0,aria-valuemax=100">
-                            <div class="progress-bar" th:style="|width: ${order.progressPercent}%|" th:text="|${order.progressPercent}%|"></div></div></td>
-                        <td th:text="|${order.estimatedRemainingSeconds} s|">0 s</td>
-                        <td th:text="${order.waitTargetMeasured} ? (${order.waitTargetMet} ? 'Cumplido' : 'Vencido') : 'Pendiente'"></td>
-                    </tr><tr th:if="${#lists.isEmpty(activeOrders)}"><td colspan="7" class="text-secondary">No hay pedidos en proceso.</td></tr></tbody>
-                </table></div>
-                <h3 class="h5 mt-4">Pedidos completados recientemente</h3>
-                <ul id="completed-order-list" class="mb-0"><li th:each="order, iter : ${completedOrders}" th:if="${iter.index < 10}"
-                    th:text="|${order.id} — ${order.totalUnits} unidades, ${order.completedAt}, objetivo ${order.waitTargetMet ? 'cumplido' : 'vencido'}|">Pedido</li>
-                    <li th:if="${#lists.isEmpty(completedOrders)}" class="text-secondary">Aún no hay pedidos completados.</li></ul>
+    <main class="container-fluid py-4">
+      <div class="row g-4">
+        <aside class="col-12 col-lg-2" aria-label="Navegación del dashboard">
+            <nav id="dashboard-nav" class="dashboard-sidebar dashboard-nav" aria-label="Categorías del dashboard">
+                <button type="button" data-category-target="operation" aria-pressed="true" class="active">Operación</button>
+                <button type="button" data-category-target="orders" aria-pressed="false">Pedidos</button>
+                <button type="button" data-category-target="tracking" aria-pressed="false">Seguimiento</button>
+                <button type="button" data-category-target="analysis" aria-pressed="false">Análisis y simulación</button>
+            </nav>
+        </aside>
+        <div id="dashboard-content" class="col-12 col-lg-10">
+        <header class="mb-4">
+            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                <div><h1>REDXela</h1>
+                    <p class="text-secondary mb-3">Centro de distribución y simulación logística</p></div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="small text-secondary" th:text="${operatorAccount.name}">Operador</span>
+                    <form method="post" th:action="@{/logout}"><button class="btn btn-sm btn-outline-secondary" type="submit">Cerrar sesión</button></form>
+                </div>
             </div>
-        </section>
-        <section class="card border-danger mb-4">
-            <div class="card-body">
-                <h2 class="h4">Errores recientes</h2>
-                <div class="table-responsive"><table class="table table-sm mb-0">
-                    <thead><tr><th>Hora</th><th>Área</th><th>Referencia</th><th>Detalle</th></tr></thead>
-                    <tbody id="operational-error-rows"><tr th:each="error : ${recentErrors}">
-                        <td th:text="${error.occurredAt}">Hora</td><td th:text="${error.source}">Área</td>
-                        <td th:text="${error.reference}">Referencia</td><td th:text="${error.message}">Detalle</td>
-                    </tr><tr th:if="${#lists.isEmpty(recentErrors)}"><td colspan="4" class="text-secondary">No hay errores recientes.</td></tr></tbody>
-                </table></div>
+            <div id="operation-feedback" th:if="${operationMessage != null or orderMessage != null}"
+                 class="alert mb-3" role="status" aria-live="polite"
+                 th:classappend="${operationAlertClass != null ? operationAlertClass : 'alert-info'}">
+                <strong th:if="${operationStatus}" th:text="${operationStatus}">Estado</strong>
+                <span th:if="${operationMessage}" th:text="${operationMessage}">Detalle</span>
+                <span th:if="${orderMessage}" th:text="${orderMessage}">Detalle</span>
             </div>
-        </section>
-        <section class="card border-warning mb-4">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-                    <div>
-                        <h2 class="h4">Demostración de conflicto de recursos</h2>
-                        <p class="mb-1">Conflicto simulado con semáforos propios; no involucra pedidos activos ni permisos del pool real. Se cancela automáticamente en dos minutos.</p>
-                    </div>
-                    <form method="post" th:action="@{/conflict/start}">
-                        <button id="conflict-start" class="btn btn-warning" type="submit" th:disabled="${conflict.active}">Provocar conflicto simulado</button>
+            <div th:if="${conflictMessage}" class="alert alert-warning mb-0" role="status" th:text="${conflictMessage}">Resultado del conflicto</div>
+        </header>
+
+        <section data-dashboard-category="operation" id="receiving-section" class="row g-3 mb-4">
+            <div class="col-lg-5">
+                <div class="card h-100"><div class="card-body">
+                    <h2 class="h4">Registrar recepción</h2>
+                    <form method="post" th:action="@{/receipts}" class="vstack gap-3">
+                        <div><label class="form-label" for="productCode">Producto del catálogo</label>
+                            <select class="form-select" id="productCode" name="productCode" required><option value="">Seleccione producto</option>
+                                <option th:each="product : ${products}" th:value="${product.code}" th:text="|${product.code} — ${product.name}|"></option>
+                            </select></div>
+                        <div><label class="form-label" for="quantity">Unidades recibidas</label>
+                            <input class="form-control" type="number" id="quantity" name="quantity" min="1" required></div>
+                        <button class="btn btn-primary" type="submit">Enviar a inventario</button>
                     </form>
-                </div>
-                <div id="conflict-message" class="alert alert-secondary mt-3 mb-3" th:text="${conflict.message}">Estado del conflicto</div>
-                <div th:if="${conflict.operationA != null}">
-                    <p id="conflict-explanation" th:text="${conflict.explanation}">Explicación</p>
-                    <div class="table-responsive"><table class="table table-bordered align-middle">
-                        <thead><tr><th>Operación</th><th>Retiene</th><th>Solicita</th><th>Estado</th></tr></thead>
-                        <tbody>
-                            <tr><td th:text="${conflict.operationA.name}">Operación A</td>
-                                <td th:text="${conflict.operationA.holds}">Recurso</td><td th:text="${conflict.operationA.requests}">Recurso</td>
-                                <td id="conflict-a-status" th:text="${conflict.operationA.status}">Bloqueada</td></tr>
-                            <tr><td th:text="${conflict.operationB.name}">Operación B</td>
-                                <td th:text="${conflict.operationB.holds}">Recurso</td><td th:text="${conflict.operationB.requests}">Recurso</td>
-                                <td id="conflict-b-status" th:text="${conflict.operationB.status}">Bloqueada</td></tr>
-                        </tbody>
+                </div></div>
+            </div>
+            <div class="col-lg-7">
+                <div class="card h-100"><div class="card-body">
+                    <h2 class="h4">Inventario por ubicación</h2>
+                    <p>Recepciones pendientes: <span id="pending-receipts" th:text="${pendingReceipts}">0</span></p>
+                    <div class="table-responsive"><table class="table table-sm">
+                        <thead><tr><th>Ubicación</th><th>Unidades ocupadas</th></tr></thead>
+                        <tbody id="location-stock-rows"><tr th:each="entry : ${locationStock}">
+                            <td th:text="${entry.key}">A-01</td><td th:text="${entry.value}">0</td>
+                        </tr></tbody>
                     </table></div>
-                    <div id="conflict-actions" th:if="${conflict.active}" class="d-flex gap-2 flex-wrap">
-                        <form method="post" th:action="@{/conflict/resolve}">
-                            <input type="hidden" name="winner" value="A">
-                            <button class="btn btn-success" type="submit">Permitir que opere A</button>
-                        </form>
-                        <form method="post" th:action="@{/conflict/resolve}">
-                            <input type="hidden" name="winner" value="B">
-                            <button class="btn btn-success" type="submit">Permitir que opere B</button>
-                        </form>
-                        <form method="post" th:action="@{/conflict/cancel}">
-                            <button class="btn btn-outline-danger" type="submit">Cancelar escenario</button>
-                        </form>
-                    </div>
-                    <p id="conflict-expiry" class="small text-secondary mt-2 mb-0" th:if="${conflict.active}" th:text="|Vence: ${conflict.expiresAt}|">Vencimiento</p>
+                </div></div>
+            </div>
+        </section>
+
+        <section data-dashboard-category="operation" id="inventory-section" class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Disponibilidad por producto</h2>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Producto</th><th>Disponible</th><th>Reservado</th><th>En almacén</th><th>Ubicaciones actuales</th></tr></thead>
+                    <tbody id="product-stock-rows"><tr th:each="stock : ${productInventory}">
+                        <td th:text="|${stock.product.code} — ${stock.product.name}|">Producto</td>
+                        <td th:text="${stock.availableUnits}">0</td><td th:text="${stock.reservedUnits}">0</td>
+                        <td th:text="${stock.storedUnits}">0</td><td th:text="${stock.unitsByLocation}">Ubicaciones</td>
+                    </tr></tbody>
+                </table></div>
+                <h2 class="h4 mt-4">Lotes almacenados</h2>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Producto</th><th>Mercancía</th><th>Unidades</th><th>Ubicaciones asignadas</th></tr></thead>
+                    <tbody id="lot-rows"><tr th:each="lot : ${lots}">
+                        <td th:text="${lot.productCode}">Producto</td>
+                        <td th:text="${lot.merchandiseTypeCode}">Tipo</td>
+                        <td th:text="${lot.quantity}">0</td>
+                        <td><span th:each="allocation, iter : ${lot.allocations}">
+                            <span th:text="|${allocation.key.code}: ${allocation.value}|">Asignación</span><span th:if="${!iter.last}">, </span>
+                        </span></td>
+                    </tr><tr th:if="${#lists.isEmpty(lots)}"><td colspan="4" class="text-secondary">Aún no hay lotes.</td></tr></tbody>
+                </table></div>
+            </div>
+        </section>
+
+        <section data-dashboard-category="operation" id="catalog-section" class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Tipos de mercancía</h2>
+                <div class="table-responsive">
+                    <table class="table table-striped mb-0">
+                        <thead><tr><th>Tipo</th><th>Características</th><th>Recursos requeridos</th></tr></thead>
+                        <tbody><tr th:each="type : ${merchandiseTypes}">
+                            <td th:text="${type.name}">Tipo</td>
+                            <td th:text="${type.description}">Descripción</td>
+                            <td th:text="${#strings.listJoin(type.requiredResourceCodes, ', ')}">Recursos</td>
+                        </tr></tbody>
+                    </table>
                 </div>
             </div>
         </section>
-        <section class="row g-3 mb-4">
+
+        <section data-dashboard-category="orders" id="order-section" class="row g-3 mb-4" hidden>
             <div class="col-lg-8">
                 <div class="card h-100"><div class="card-body">
                     <h2 class="h4">Crear pedido</h2>
@@ -130,11 +141,12 @@
                                 <option th:each="level : ${serviceLevels}" th:value="${level.name()}" th:text="|${level.level} - ${level.displayName} (${level.targetWaitMinutes} min objetivo)|"></option>
                             </select></div>
                         <div class="table-responsive"><table class="table table-sm align-middle mb-0">
-                            <thead><tr><th>Producto del catálogo</th><th>Mercancía</th><th>Unidades</th></tr></thead>
+                            <thead><tr><th>Producto del catálogo</th><th>Mercancía</th><th>Unidades</th><th>Acción</th></tr></thead>
                             <tbody id="orderLines"><tr>
                                 <td><select class="form-select order-product" name="productCodes" required><option value="">Seleccione producto</option><option th:each="product : ${products}" th:value="${product.code}" th:attr="data-type=${product.merchandiseType.name}" th:text="|${product.code} — ${product.name}|"></option></select></td>
                                 <td><span class="product-type">Seleccione producto</span></td>
                                 <td><input class="form-control" type="number" name="quantities" min="1" value="1" required></td>
+                                <td><button class="btn btn-outline-danger btn-sm remove-order-line" type="button" disabled aria-label="Quitar línea">Quitar</button></td>
                             </tr></tbody>
                         </table></div>
                         <div class="d-flex gap-2"><button class="btn btn-outline-secondary" type="button" onclick="addOrderLine()">Agregar producto</button>
@@ -165,7 +177,122 @@
                 </div></div>
             </div>
         </section>
-        <section class="card mb-4">
+
+        <section data-dashboard-category="tracking" id="processing-section" class="card mb-4" hidden>
+            <div class="card-body">
+                <h2 class="h4">Pedidos activos</h2>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Pedido</th><th>Cliente</th><th>Unidades</th><th>Inicio</th><th>Progreso</th><th>Restante estimado</th><th>Objetivo de espera</th></tr></thead>
+                    <tbody id="active-order-rows"><tr th:each="order : ${activeOrders}">
+                        <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
+                        <td th:text="${order.totalUnits}">0</td><td th:text="${order.startedAt}">Inicio</td>
+                        <td><div class="progress" role="progressbar" th:attr="aria-valuenow=${order.progressPercent},aria-valuemin=0,aria-valuemax=100">
+                            <div class="progress-bar" th:style="|width: ${order.progressPercent}%|" th:text="|${order.progressPercent}%|"></div></div></td>
+                        <td th:text="|${order.estimatedRemainingSeconds} s|">0 s</td>
+                        <td th:text="${order.waitTargetMeasured} ? (${order.waitTargetMet} ? 'Cumplido' : 'Vencido') : 'Pendiente'"></td>
+                    </tr><tr th:if="${#lists.isEmpty(activeOrders)}"><td colspan="7" class="text-secondary">No hay pedidos en proceso.</td></tr></tbody>
+                </table></div>
+                <h3 class="h5 mt-4">Pedidos completados recientemente</h3>
+            <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Pedido</th><th>Cliente</th><th>Servicio</th><th>Unidades</th><th>Completado</th><th>Objetivo</th><th>Detalles</th></tr></thead>
+                <tbody id="completed-order-rows"><tr th:each="order, iter : ${completedOrders}" th:if="${iter.index < 10}">
+                    <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
+                    <td th:text="${order.serviceLevel.displayName}">Servicio</td><td th:text="${order.totalUnits}">0</td>
+                    <td th:text="${order.completedAt}">Fecha</td><td th:text="${order.waitTargetMet ? 'Cumplido' : 'Vencido'}">Estado</td>
+                    <td><details><summary>Ver detalles</summary><ul class="mb-0 ps-3">
+                        <li th:each="line : ${order.lines}" th:text="|${line.productName} (${line.productCode}) — ${line.quantity} unidades — ${line.merchandiseType.name}|">Producto</li>
+                    </ul></details></td>
+                </tr><tr th:if="${#lists.isEmpty(completedOrders)}"><td colspan="7" class="text-secondary">Aún no hay pedidos completados.</td></tr></tbody>
+            </table></div>
+            </div>
+        </section>
+
+        <section data-dashboard-category="tracking" id="queue-section" class="card mb-4" hidden>
+            <div class="card-body">
+                <h2 class="h4">Cola de pedidos</h2>
+                <p th:text="|Ordenada por: ${queuePolicy.displayName}|">Política</p>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Pedido</th><th>Cliente</th><th>Servicio</th><th>Unidades</th><th>Estado</th><th>En cola desde</th></tr></thead>
+                    <tbody id="waiting-queue-rows"><tr th:each="order : ${waitingQueue}">
+                        <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
+                        <td th:text="${order.serviceLevel.displayName}">Servicio</td><td th:text="${order.totalUnits}">0</td>
+                        <td th:text="${order.status.displayName}">Estado</td><td th:text="${order.queueEnteredAt}">Fecha</td>
+                    </tr><tr th:if="${#lists.isEmpty(waitingQueue)}"><td colspan="6" class="text-secondary">La cola está vacía.</td></tr></tbody>
+                </table></div>
+                <h3 class="h5 mt-4">Esperando inventario</h3>
+                <ul id="stock-wait-list" class="mb-0"><li th:each="order : ${stockWaitOrders}" th:text="|${order.id} — ${order.customer.name}, ${order.totalUnits} unidades|">Pedido</li>
+                    <li th:if="${#lists.isEmpty(stockWaitOrders)}" class="text-secondary">No hay pedidos esperando existencias.</li></ul>
+            </div>
+        </section>
+
+        <section data-dashboard-category="tracking" id="resources-section" class="card mb-4" hidden>
+            <div class="card-body">
+                <h2 class="h4">Recursos compartidos</h2>
+                <div class="table-responsive">
+                    <table class="table table-striped mb-0">
+                        <thead><tr><th>Recurso</th><th>Capacidad</th><th>En uso</th><th>Pedidos que lo usan</th></tr></thead>
+                        <tbody id="resource-rows"><tr th:each="state : ${resourceStates}">
+                            <td th:text="${state.resource.name}">Recurso</td>
+                            <td th:text="${state.resource.capacity}">0</td>
+                            <td th:text="${state.inUse}">0</td>
+                            <td th:text="${#strings.listJoin(state.orderIds, ', ')}">Nadie</td>
+                        </tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section data-dashboard-category="tracking" id="receipt-results-section" class="card mb-4" hidden>
+            <div class="card-body">
+                <h2 class="h4">Resultado de recepciones</h2>
+                <div class="table-responsive"><table class="table table-sm mb-0">
+                    <thead><tr><th>Recibo</th><th>Resultado</th><th>Solicitadas</th><th>Aceptadas</th><th>Detalle</th></tr></thead>
+                    <tbody id="receipt-result-rows"><tr th:each="result : ${receiptResults}">
+                        <td th:text="${result.receiptId}">ID</td>
+                        <td><span class="badge" th:classappend="${result.status.name() == 'ACCEPTED' ? 'text-bg-success' : (result.status.name() == 'PARTIALLY_ACCEPTED' ? 'text-bg-warning' : (result.status.name() == 'REJECTED' or result.status.name() == 'FAILED' ? 'text-bg-danger' : 'text-bg-secondary'))}" th:text="${result.status.displayName}">Estado</span></td>
+                        <td th:text="${result.requestedUnits}">0</td><td th:text="${result.acceptedUnits}">0</td><td th:text="${result.message}">Detalle</td>
+                    </tr><tr th:if="${#lists.isEmpty(receiptResults)}"><td colspan="5" class="text-secondary">Sin recepciones registradas.</td></tr></tbody>
+                </table></div>
+            </div>
+        </section>
+
+        <section data-dashboard-category="tracking" id="errors-section" class="card border-danger mb-4" hidden>
+            <div class="card-body">
+                <h2 class="h4">Errores recientes</h2>
+                <div class="table-responsive"><table class="table table-sm mb-0">
+                    <thead><tr><th>Hora</th><th>Área</th><th>Referencia</th><th>Detalle</th></tr></thead>
+                    <tbody id="operational-error-rows"><tr th:each="error : ${recentErrors}">
+                        <td th:text="${error.occurredAt}">Hora</td><td th:text="${error.source}">Área</td>
+                        <td th:text="${error.reference}">Referencia</td><td th:text="${error.message}">Detalle</td>
+                    </tr><tr th:if="${#lists.isEmpty(recentErrors)}"><td colspan="4" class="text-secondary">No hay errores recientes.</td></tr></tbody>
+                </table></div>
+            </div>
+        </section>
+
+        <section data-dashboard-category="analysis" id="metrics-section" class="row g-3 mb-4" hidden>
+            <div class="col-md-4"><div class="card h-100"><div class="card-body">
+                <h2 class="h5">Estado del sistema</h2>
+                <p class="mb-1">Pedidos registrados: <strong id="stat-total" th:text="${orderStatistics.totalOrders}">0</strong></p>
+                <p class="mb-1">Completados: <strong id="stat-completed" th:text="${orderStatistics.completedOrders}">0</strong></p>
+                <p class="mb-1">En cola: <strong id="stat-queued" th:text="${orderStatistics.queuedOrders}">0</strong></p>
+                <p class="mb-1">Esperando inventario: <strong id="stat-stock-wait" th:text="${orderStatistics.waitingForStock}">0</strong></p>
+                <p class="mb-1">Unidades solicitadas: <strong id="stat-units" th:text="${orderStatistics.totalUnits}">0</strong></p>
+                <p class="mb-1">Procesamiento medio (s): <strong id="stat-processing" th:text="${#numbers.formatDecimal(orderStatistics.averageProcessingSeconds, 1, 1)}">0.0</strong></p>
+                <p class="mb-1">Espera media hasta iniciar (s): <strong id="stat-wait" th:text="${#numbers.formatDecimal(orderStatistics.averageWaitSeconds, 1, 1)}">0.0</strong></p>
+                <p class="mb-0">Objetivos de espera cumplidos: <strong id="stat-sla" th:text="|${orderStatistics.waitTargetsMet} / ${orderStatistics.waitTargetsEvaluated}|">0 / 0</strong></p>
+            </div></div></div>
+            <div class="col-md-4"><div class="card h-100"><div class="card-body">
+                <h2 class="h5">Almacén</h2>
+                <p>Existencias: <span id="stored-units" th:text="${storedUnits}">0</span> / <span id="warehouse-capacity" th:text="${warehouseCapacity}">1000</span> unidades</p>
+                <p class="mb-0" th:text="|Ubicaciones físicas: ${#lists.size(locations)}|">Ubicaciones</p>
+            </div></div></div>
+            <div class="col-md-4"><div class="card h-100"><div class="card-body">
+                <h2 class="h5">Fundación</h2>
+                <p class="mb-0">El estado inicial es en memoria; la simulación aún no está activa.</p>
+            </div></div></div>
+        </section>
+
+        <section data-dashboard-category="analysis" id="comparison-section" class="card mb-4" hidden>
             <div class="card-body">
                 <h2 class="h4">Comparación controlada de políticas</h2>
                 <p id="comparison-caption" th:if="${comparison.workloadSize > 0}" th:text="|Cola capturada ${comparison.capturedAt}; ${comparison.workloadSize} pedidos, ${comparison.simulatedWorkers} trabajadores simulados.|">Carga</p>
@@ -183,120 +310,50 @@
                 </table></div>
             </div>
         </section>
-        <section class="card mb-4">
+
+        <section data-dashboard-category="analysis" id="conflict-section" class="card border-warning mb-4" hidden>
             <div class="card-body">
-                <h2 class="h4">Cola de pedidos</h2>
-                <p th:text="|Ordenada por: ${queuePolicy.displayName}|">Política</p>
-                <div class="table-responsive"><table class="table table-striped mb-0">
-                    <thead><tr><th>Pedido</th><th>Cliente</th><th>Servicio</th><th>Unidades</th><th>Estado</th><th>En cola desde</th></tr></thead>
-                    <tbody id="waiting-queue-rows"><tr th:each="order : ${waitingQueue}">
-                        <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
-                        <td th:text="${order.serviceLevel.displayName}">Servicio</td><td th:text="${order.totalUnits}">0</td>
-                        <td th:text="${order.status.displayName}">Estado</td><td th:text="${order.queueEnteredAt}">Fecha</td>
-                    </tr><tr th:if="${#lists.isEmpty(waitingQueue)}"><td colspan="6" class="text-secondary">La cola está vacía.</td></tr></tbody>
-                </table></div>
-                <h3 class="h5 mt-4">Esperando inventario</h3>
-                <ul id="stock-wait-list" class="mb-0"><li th:each="order : ${stockWaitOrders}" th:text="|${order.id} — ${order.customer.name}, ${order.totalUnits} unidades|">Pedido</li>
-                    <li th:if="${#lists.isEmpty(stockWaitOrders)}" class="text-secondary">No hay pedidos esperando existencias.</li></ul>
-            </div>
-        </section>
-        <section class="row g-3 mb-4">
-            <div class="col-lg-5">
-                <div class="card h-100"><div class="card-body">
-                    <h2 class="h4">Registrar recepción</h2>
-                    <form method="post" th:action="@{/receipts}" class="vstack gap-3">
-                        <div><label class="form-label" for="productCode">Producto del catálogo</label>
-                            <select class="form-select" id="productCode" name="productCode" required><option value="">Seleccione producto</option>
-                                <option th:each="product : ${products}" th:value="${product.code}" th:text="|${product.code} — ${product.name}|"></option>
-                            </select></div>
-                        <div><label class="form-label" for="quantity">Unidades recibidas</label>
-                            <input class="form-control" type="number" id="quantity" name="quantity" min="1" required></div>
-                        <button class="btn btn-primary" type="submit">Enviar a inventario</button>
+                <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                    <div>
+                        <h2 class="h4">Demostración de conflicto de recursos</h2>
+                        <p class="mb-1">Conflicto simulado con semáforos propios; no involucra pedidos activos ni permisos del pool real. Se cancela automáticamente en dos minutos.</p>
+                    </div>
+                    <form method="post" th:action="@{/conflict/start}">
+                        <button id="conflict-start" class="btn btn-warning" type="submit" th:disabled="${conflict.active}">Provocar conflicto simulado</button>
                     </form>
-                </div></div>
-            </div>
-            <div class="col-lg-7">
-                <div class="card h-100"><div class="card-body">
-                    <h2 class="h4">Inventario por ubicación</h2>
-                    <p>Recepciones pendientes: <span id="pending-receipts" th:text="${pendingReceipts}">0</span></p>
-                    <div class="table-responsive"><table class="table table-sm">
-                        <thead><tr><th>Ubicación</th><th>Unidades ocupadas</th></tr></thead>
-                        <tbody id="location-stock-rows"><tr th:each="entry : ${locationStock}">
-                            <td th:text="${entry.key}">A-01</td><td th:text="${entry.value}">0</td>
-                        </tr></tbody>
+                </div>
+                <div id="conflict-message" class="alert alert-secondary mt-3 mb-3" th:text="${conflict.message}">Estado del conflicto</div>
+                <div th:if="${conflict.operationA != null}">
+                    <p id="conflict-explanation" th:text="${conflict.explanation}">Explicación</p>
+                    <div class="table-responsive"><table class="table table-bordered align-middle">
+                        <thead><tr><th>Operación</th><th>Retiene</th><th>Solicita</th><th>Estado</th></tr></thead>
+                        <tbody>
+                            <tr><td th:text="${conflict.operationA.name}">Operación A</td>
+                                <td id="conflict-a-holds" th:text="${conflict.operationA.holds}">Recurso</td><td id="conflict-a-requests" th:text="${conflict.operationA.requests}">Recurso</td>
+                                <td id="conflict-a-status" th:text="${conflict.operationA.status}">Bloqueada</td></tr>
+                            <tr><td th:text="${conflict.operationB.name}">Operación B</td>
+                                <td id="conflict-b-holds" th:text="${conflict.operationB.holds}">Recurso</td><td id="conflict-b-requests" th:text="${conflict.operationB.requests}">Recurso</td>
+                                <td id="conflict-b-status" th:text="${conflict.operationB.status}">Bloqueada</td></tr>
+                        </tbody>
                     </table></div>
-                </div></div>
-            </div>
-        </section>
-        <section class="card mb-4">
-            <div class="card-body">
-                <h2 class="h4">Disponibilidad por producto</h2>
-                <div class="table-responsive"><table class="table table-striped mb-0">
-                    <thead><tr><th>Producto</th><th>Disponible</th><th>Reservado</th><th>En almacén</th><th>Ubicaciones actuales</th></tr></thead>
-                    <tbody id="product-stock-rows"><tr th:each="stock : ${productInventory}">
-                        <td th:text="|${stock.product.code} — ${stock.product.name}|">Producto</td>
-                        <td th:text="${stock.availableUnits}">0</td><td th:text="${stock.reservedUnits}">0</td>
-                        <td th:text="${stock.storedUnits}">0</td><td th:text="${stock.unitsByLocation}">Ubicaciones</td>
-                    </tr></tbody>
-                </table></div>
-                <h2 class="h4 mt-4">Lotes almacenados</h2>
-                <div class="table-responsive"><table class="table table-striped mb-0">
-                    <thead><tr><th>Producto</th><th>Mercancía</th><th>Unidades</th><th>Ubicaciones asignadas</th></tr></thead>
-                    <tbody id="lot-rows"><tr th:each="lot : ${lots}">
-                        <td th:text="${lot.productCode}">Producto</td>
-                        <td th:text="${lot.merchandiseTypeCode}">Tipo</td>
-                        <td th:text="${lot.quantity}">0</td>
-                        <td><span th:each="allocation, iter : ${lot.allocations}">
-                            <span th:text="|${allocation.key.code}: ${allocation.value}|">Asignación</span><span th:if="${!iter.last}">, </span>
-                        </span></td>
-                    </tr><tr th:if="${#lists.isEmpty(lots)}"><td colspan="4" class="text-secondary">Aún no hay lotes.</td></tr></tbody>
-                </table></div>
-            </div>
-        </section>
-        <section class="card mb-4">
-            <div class="card-body">
-                <h2 class="h4">Resultado de recepciones</h2>
-                <div class="table-responsive"><table class="table table-sm mb-0">
-                    <thead><tr><th>Recibo</th><th>Resultado</th><th>Aceptadas</th><th>Detalle</th></tr></thead>
-                    <tbody id="receipt-result-rows"><tr th:each="result : ${receiptResults}">
-                        <td th:text="${result.receiptId}">ID</td><td th:text="${result.status.displayName}">Estado</td>
-                        <td th:text="${result.acceptedUnits}">0</td><td th:text="${result.message}">Detalle</td>
-                    </tr><tr th:if="${#lists.isEmpty(receiptResults)}"><td colspan="4" class="text-secondary">Sin recepciones procesadas.</td></tr></tbody>
-                </table></div>
-            </div>
-        </section>
-        <section class="card mb-4">
-            <div class="card-body">
-                <h2 class="h4">Recursos compartidos</h2>
-                <div class="table-responsive">
-                    <table class="table table-striped mb-0">
-                        <thead><tr><th>Recurso</th><th>Capacidad</th><th>En uso</th><th>Pedidos que lo usan</th></tr></thead>
-                        <tbody id="resource-rows"><tr th:each="state : ${resourceStates}">
-                            <td th:text="${state.resource.name}">Recurso</td>
-                            <td th:text="${state.resource.capacity}">0</td>
-                            <td th:text="${state.inUse}">0</td>
-                            <td th:text="${#strings.listJoin(state.orderIds, ', ')}">Nadie</td>
-                        </tr></tbody>
-                    </table>
+                    <div id="conflict-actions" th:if="${conflict.active and !conflict.resolving}" class="d-flex gap-2 flex-wrap">
+                        <form method="post" th:action="@{/conflict/resolve}">
+                            <input type="hidden" name="winner" value="A">
+                            <button class="btn btn-success" type="submit">Permitir que opere A</button>
+                        </form>
+                        <form method="post" th:action="@{/conflict/resolve}">
+                            <input type="hidden" name="winner" value="B">
+                            <button class="btn btn-success" type="submit">Permitir que opere B</button>
+                        </form>
+                        <form method="post" th:action="@{/conflict/cancel}">
+                            <button class="btn btn-outline-danger" type="submit">Cancelar escenario</button>
+                        </form>
+                    </div>
+                    <p id="conflict-expiry" class="small text-secondary mt-2 mb-0" th:if="${conflict.active}" th:text="|Vence: ${conflict.expiresAt}|">Vencimiento</p>
                 </div>
             </div>
         </section>
-        <section class="card">
-            <div class="card-body">
-                <h2 class="h4">Tipos de mercancía</h2>
-                <div class="table-responsive">
-                    <table class="table table-striped mb-0">
-                        <thead><tr><th>Tipo</th><th>Características</th><th>Recursos requeridos</th></tr></thead>
-                        <tbody><tr th:each="type : ${merchandiseTypes}">
-                            <td th:text="${type.name}">Tipo</td>
-                            <td th:text="${type.description}">Descripción</td>
-                            <td th:text="${#strings.listJoin(type.requiredResourceCodes, ', ')}">Recursos</td>
-                        </tr></tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-    </main>
+
     <script>
         const formatTime = value => value ? new Date(value).toLocaleString() : '—';
         const cell = (row, value) => {
@@ -343,8 +400,25 @@
                 cell(row, order.id); cell(row, order.customerName);
                 cell(row, `${order.serviceLevel} (${order.targetWaitMinutes} min)`);
                 cell(row, order.units); cell(row, order.status); cell(row, formatTime(order.queueEnteredAt));
+            } else if (mode === 'completed') {
+                cell(row, order.id); cell(row, order.customerName); cell(row, order.serviceLevel); cell(row, order.units);
+                cell(row, formatTime(order.completedAt)); cell(row, order.waitTargetMet ? 'Cumplido' : 'Vencido');
+                const detailsCell = cell(row, '');
+                const details = document.createElement('details');
+                const summary = document.createElement('summary');
+                summary.textContent = 'Ver detalles';
+                details.appendChild(summary);
+                const list = document.createElement('ul');
+                list.className = 'mb-0 ps-3';
+                (order.lines || []).forEach(line => {
+                    const item = document.createElement('li');
+                    item.textContent = `${line.productName} (${line.productCode}) — ${line.quantity} unidades — ${line.merchandiseType}`;
+                    list.appendChild(item);
+                });
+                details.appendChild(list);
+                detailsCell.appendChild(details);
             } else {
-                cell(row, `${order.id} — ${order.units} unidades, ${formatTime(order.completedAt)}, objetivo ${order.waitTargetMet ? 'cumplido' : 'vencido'}`);
+                cell(row, `${order.id} — ${order.units} unidades`);
             }
             return row;
         }
@@ -358,16 +432,8 @@
             setText('stored-units', state.storedUnits); setText('warehouse-capacity', state.capacityUnits);
             setRows('active-order-rows', state.active, order => renderOrder(order, 'active'), 'No hay pedidos en proceso.', 7);
             setRows('waiting-queue-rows', state.queue, order => renderOrder(order, 'queue'), 'La cola está vacía.', 6);
-            const completedList = document.getElementById('completed-order-list');
-            if (completedList) {
-                completedList.replaceChildren();
-                (state.completed.length ? state.completed.slice(0, 10) : [null]).forEach(order => {
-                    const li = document.createElement('li');
-                    li.textContent = order ? `${order.id} — ${order.units} unidades, ${formatTime(order.completedAt)}, objetivo ${order.waitTargetMet ? 'cumplido' : 'vencido'}` : 'Aún no hay pedidos completados.';
-                    if (!order) li.className = 'text-secondary';
-                    completedList.appendChild(li);
-                });
-            }
+            setRows('completed-order-rows', state.completed.slice(0, 10), order => renderOrder(order, 'completed'),
+                'Aún no hay pedidos completados.', 7);
             const waitingList = document.getElementById('stock-wait-list');
             if (waitingList) {
                 waitingList.replaceChildren();
@@ -396,11 +462,18 @@
                 cell(row, lot.productCode); cell(row, lot.merchandiseTypeCode); cell(row, lot.quantity);
                 cell(row, Object.entries(lot.allocations).map(([location, units]) => `${location}: ${units}`).join(', ')); return row;
             }, 'Aún no hay lotes.', 4);
-            const receiptStatusNames = {QUEUED: 'En cola', ACCEPTED: 'Aceptada', PARTIALLY_ACCEPTED: 'Aceptada parcialmente', REJECTED: 'Rechazada', FAILED: 'Error de procesamiento'};
+            const receiptStatusNames = {QUEUED: 'En cola', ACCEPTED: 'Aceptada', PARTIALLY_ACCEPTED: 'Aceptada parcialmente', REJECTED: 'Rechazada', FAILED: 'Fallida'};
+            const receiptStatusClasses = {QUEUED: 'text-bg-secondary', ACCEPTED: 'text-bg-success', PARTIALLY_ACCEPTED: 'text-bg-warning', REJECTED: 'text-bg-danger', FAILED: 'text-bg-danger'};
             setRows('receipt-result-rows', state.receiptResults, result => {
                 const row = document.createElement('tr');
-                cell(row, result.receiptId); cell(row, receiptStatusNames[result.status] || result.status); cell(row, result.acceptedUnits); cell(row, result.message); return row;
-            }, 'Sin recepciones procesadas.', 4);
+                cell(row, result.receiptId);
+                const status = cell(row, '');
+                const badge = document.createElement('span');
+                badge.className = `badge ${receiptStatusClasses[result.status] || 'text-bg-secondary'}`;
+                badge.textContent = receiptStatusNames[result.status] || result.status;
+                status.appendChild(badge);
+                cell(row, result.requestedUnits); cell(row, result.acceptedUnits); cell(row, result.message); return row;
+            }, 'Sin recepciones registradas.', 5);
             setRows('operational-error-rows', state.recentErrors, error => {
                 const row = document.createElement('tr');
                 cell(row, formatTime(error.occurredAt)); cell(row, error.source);
@@ -412,10 +485,18 @@
             setText('conflict-explanation', conflict.explanation || '');
             if (conflict.operationA) setText('conflict-a-status', conflict.operationA.status);
             if (conflict.operationB) setText('conflict-b-status', conflict.operationB.status);
+            if (conflict.operationA) {
+                setText('conflict-a-holds', conflict.operationA.holds);
+                setText('conflict-a-requests', conflict.operationA.requests);
+            }
+            if (conflict.operationB) {
+                setText('conflict-b-holds', conflict.operationB.holds);
+                setText('conflict-b-requests', conflict.operationB.requests);
+            }
             const start = document.getElementById('conflict-start');
             if (start) start.disabled = conflict.active;
             const actions = document.getElementById('conflict-actions');
-            if (actions) actions.hidden = !conflict.active;
+            if (actions) actions.hidden = !conflict.active || conflict.resolving;
             const expiry = document.getElementById('conflict-expiry');
             if (expiry) { expiry.hidden = !conflict.active; expiry.textContent = conflict.active ? `Vence: ${formatTime(conflict.expiresAt)}` : ''; }
             const comparison = state.comparison;
@@ -453,13 +534,46 @@
             row.querySelectorAll('input').forEach(input => input.value = input.name === 'quantities' ? '1' : '');
             row.querySelector('.product-type').textContent = 'Tipo';
             document.getElementById('orderLines').appendChild(row);
+            updateRemoveButtons();
         }
         const orderLines = document.getElementById('orderLines');
+        function updateRemoveButtons() {
+            const rows = orderLines.querySelectorAll('tr');
+            rows.forEach(row => { row.querySelector('.remove-order-line').disabled = rows.length === 1; });
+        }
+        orderLines.addEventListener('click', event => {
+            const button = event.target.closest('.remove-order-line');
+            if (!button || orderLines.querySelectorAll('tr').length === 1) return;
+            button.closest('tr').remove();
+            updateRemoveButtons();
+        });
         orderLines.addEventListener('change', event => {
             if (!event.target.matches('.order-product')) return;
             event.target.closest('tr').querySelector('.product-type').textContent = event.target.selectedOptions[0]?.dataset.type || 'Tipo';
         });
         toggleNewCustomer();
+        updateRemoveButtons();
+
+        const categoryButtons = [...document.querySelectorAll('[data-category-target]')];
+        const categoryPanels = [...document.querySelectorAll('section[data-dashboard-category]')];
+        function selectDashboardCategory(category) {
+            categoryPanels.forEach(panel => {
+                const selected = panel.dataset.dashboardCategory === category;
+                panel.hidden = !selected;
+                panel.setAttribute('aria-hidden', String(!selected));
+            });
+            categoryButtons.forEach(button => {
+                const selected = button.dataset.categoryTarget === category;
+                button.classList.toggle('active', selected);
+                button.setAttribute('aria-pressed', String(selected));
+            });
+        }
+        categoryButtons.forEach(button => button.addEventListener('click', () => {
+            selectDashboardCategory(button.dataset.categoryTarget);
+        }));
     </script>
+        </div>
+      </div>
+    </main>
 </body>
 </html>

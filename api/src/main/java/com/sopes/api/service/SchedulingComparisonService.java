@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
+/** Proyecta las políticas sobre la misma carga capturada y los mismos trabajadores simulados. */
 @Service
 public class SchedulingComparisonService {
     private static final int SIMULATED_WORKERS = 4;
@@ -26,6 +27,7 @@ public class SchedulingComparisonService {
     public synchronized ComparisonSnapshot latest() { return latest; }
 
     private PolicyResult simulate(QueuePolicy policy, List<CustomerOrder> workload, Instant capturedAt) {
+        // La cola de disponibilidad asigna cada pedido al trabajador simulado que queda libre primero.
         List<CustomerOrder> ordered = workload.stream().sorted(comparator(policy)).toList();
         PriorityQueue<Double> workers = new PriorityQueue<>();
         for (int i = 0; i < SIMULATED_WORKERS; i++) workers.add(0.0);

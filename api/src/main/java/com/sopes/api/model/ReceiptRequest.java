@@ -1,5 +1,6 @@
 package com.sopes.api.model;
 
+/** Datos validados que recepción envía a la cola de inventario. */
 public record ReceiptRequest(String productCode, MerchandiseType merchandiseType, int quantity) {
     public ReceiptRequest {
         if (productCode == null || productCode.isBlank()) throw new IllegalArgumentException("Seleccione un producto.");

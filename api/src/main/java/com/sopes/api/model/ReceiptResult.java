@@ -3,6 +3,7 @@ package com.sopes.api.model;
 import java.time.Instant;
 import java.util.Map;
 
+/** Resultado de una recepción, incluida cualquier asignación física parcial. */
 public record ReceiptResult(String receiptId, ReceiptStatus status, int requestedUnits, int acceptedUnits,
                             String message, Instant processedAt, Map<String, Integer> allocations) {
     public ReceiptResult {

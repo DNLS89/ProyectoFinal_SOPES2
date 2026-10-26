@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/** Define la capacidad total y las ubicaciones físicas disponibles del almacén. */
 @Service
 public class WarehouseConfiguration {
     public static final int CAPACITY_UNITS = 1_000;

@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/** Mantiene el catálogo fijo de productos asociado a sus tipos de mercancía. */
 @Service
 public class ProductCatalog {
     private final MerchandiseCatalog merchandise;

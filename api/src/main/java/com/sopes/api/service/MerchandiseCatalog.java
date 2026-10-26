@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/** Expone tipos de mercancía y las combinaciones de recursos que requiere cada uno. */
 @Service
 public class MerchandiseCatalog {
     private final List<MerchandiseType> types = List.of(

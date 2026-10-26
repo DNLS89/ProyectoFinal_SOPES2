@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
+/** Administra permisos de recursos mediante semáforos y entrega leases liberables. */
 @Service
 public class SharedResourceService {
     private final Map<String, SharedResource> definitions = new HashMap<>();

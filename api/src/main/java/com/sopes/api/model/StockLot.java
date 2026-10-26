@@ -2,6 +2,7 @@ package com.sopes.api.model;
 
 import java.util.Map;
 
+/** Lote recibido cuya cantidad se distribuye entre ubicaciones físicas. */
 public record StockLot(String id, String productCode, String merchandiseTypeCode, int quantity,
                        Map<WarehouseLocation, Integer> allocations) {
     public StockLot {

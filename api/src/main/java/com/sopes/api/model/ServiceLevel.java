@@ -1,5 +1,6 @@
 package com.sopes.api.model;
 
+/** Niveles de servicio y sus límites objetivo de espera en minutos. */
 public enum ServiceLevel {
     EXPRESS(1, "Exprés", 0),
     PRIORITY(2, "Prioritario", 10),

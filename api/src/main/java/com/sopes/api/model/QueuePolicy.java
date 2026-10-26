@@ -1,5 +1,6 @@
 package com.sopes.api.model;
 
+/** Criterios disponibles para ordenar pedidos elegibles en espera. */
 public enum QueuePolicy {
     SERVICE_PRIORITY("Prioridad de servicio"),
     LONGEST_WAIT("Mayor tiempo de espera"),

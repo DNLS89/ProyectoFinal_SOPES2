@@ -11,6 +11,7 @@ import com.sopes.api.service.OrderGeneratorService;
 import com.sopes.api.service.OrderIntakeService;
 import com.sopes.api.service.OrderProcessingService;
 import com.sopes.api.service.ProductCatalog;
+import com.sopes.api.service.PortalAccountService;
 import com.sopes.api.service.CustomerRegistry;
 import com.sopes.api.service.SchedulingComparisonService;
 import com.sopes.api.service.ReceivingService;
@@ -24,7 +25,9 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import org.springframework.ui.Model;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import jakarta.servlet.http.HttpSession;
 
+/** Atiende formularios del tablero y publica una fotografía del estado para refresco en vivo. */
 @Controller
 public class DashboardController {
     private final MerchandiseCatalog merchandiseCatalog;
@@ -67,7 +70,8 @@ public class DashboardController {
     }
 
     @GetMapping("/")
-    public String dashboard(Model model) {
+    public String dashboard(HttpSession session, Model model) {
+        model.addAttribute("operatorAccount", session.getAttribute(PortalAccountService.SESSION_ATTRIBUTE));
         model.addAttribute("merchandiseTypes", merchandiseCatalog.findAll());
         model.addAttribute("products", productCatalog.findAll());
         model.addAttribute("customers", customerRegistry.findAll());
@@ -106,7 +110,7 @@ public class DashboardController {
     public LiveDashboardState liveState() {
         var allOrders = orderService.findAll();
         var conflict = conflictService.snapshot();
-        ConflictView conflictView = new ConflictView(conflict.active(), conflict.message(), conflict.explanation(),
+        ConflictView conflictView = new ConflictView(conflict.active(), conflict.resolving(), conflict.message(), conflict.explanation(),
                 conflict.expiresAt(), conflict.operationA() == null ? null : conflictOperation(conflict.operationA()),
                 conflict.operationB() == null ? null : conflictOperation(conflict.operationB()));
         return new LiveDashboardState(orderService.statistics(),
@@ -129,7 +133,9 @@ public class DashboardController {
         return new OrderView(order.id(), order.customer().name(), order.serviceLevel().getDisplayName(),
                 order.serviceLevel().getTargetWaitMinutes(), order.getTotalUnits(), order.status().getDisplayName(),
                 order.queueEnteredAt(), order.startedAt(), order.completedAt(), order.progressPercent(),
-                order.estimatedRemainingSeconds(), order.queueWaitSeconds(), order.waitTargetMeasured(), order.waitTargetMet());
+                order.estimatedRemainingSeconds(), order.queueWaitSeconds(), order.waitTargetMeasured(), order.waitTargetMet(),
+                order.lines().stream().map(line -> new OrderLineView(line.productCode(), line.productName(),
+                        line.merchandiseType().name(), line.quantity())).toList());
     }
 
     private ConflictOperationView conflictOperation(ResourceConflictService.ConflictOperation operation) {
@@ -139,11 +145,14 @@ public class DashboardController {
     public record OrderView(String id, String customerName, String serviceLevel, int targetWaitMinutes, int units,
                             String status, java.time.Instant queueEnteredAt, java.time.Instant startedAt,
                             java.time.Instant completedAt, int progressPercent, long remainingSeconds,
-                            long queueWaitSeconds, boolean waitTargetMeasured, boolean waitTargetMet) { }
+                            long queueWaitSeconds, boolean waitTargetMeasured, boolean waitTargetMet,
+                            java.util.List<OrderLineView> lines) { }
+
+    public record OrderLineView(String productCode, String productName, String merchandiseType, int quantity) { }
 
     public record ConflictOperationView(String name, String holds, String requests, String status) { }
     public record LotView(String productCode, String merchandiseTypeCode, int quantity, java.util.Map<String, Integer> allocations) { }
-    public record ConflictView(boolean active, String message, String explanation, java.time.Instant expiresAt,
+    public record ConflictView(boolean active, boolean resolving, String message, String explanation, java.time.Instant expiresAt,
                                ConflictOperationView operationA, ConflictOperationView operationB) { }
 
     public record LiveDashboardState(WaitingOrderService.OrderStatistics statistics, java.util.List<OrderView> queue,
@@ -164,6 +173,21 @@ public class DashboardController {
                 .limit(20).toList();
     }
 
+    private void addOperationFeedback(RedirectAttributes attributes, String status, String message, String alertClass) {
+        attributes.addFlashAttribute("operationStatus", status);
+        attributes.addFlashAttribute("operationMessage", message);
+        attributes.addFlashAttribute("operationAlertClass", alertClass);
+    }
+
+    private String receiptAlertClass(com.sopes.api.model.ReceiptStatus status) {
+        return switch (status) {
+            case QUEUED -> "alert-info";
+            case ACCEPTED -> "alert-success";
+            case PARTIALLY_ACCEPTED -> "alert-warning";
+            case REJECTED, FAILED -> "alert-danger";
+        };
+    }
+
     @PostMapping("/receipts")
     public String submitReceipt(@RequestParam(required = false) String productCode,
                                 @RequestParam(required = false) String quantity,
@@ -174,11 +198,21 @@ public class DashboardController {
             var product = productCatalog.findByCode(productCode);
             int units = Integer.parseInt(quantity);
             ReceiptResult result = receivingService.submit(new ReceiptRequest(product.code(), product.merchandiseType(), units));
-            redirectAttributes.addFlashAttribute("receiptMessage", result.message());
-            redirectAttributes.addFlashAttribute("receiptStatus", result.status().getDisplayName());
+            String status = switch (result.status()) {
+                case QUEUED -> "Aceptado para procesamiento";
+                case ACCEPTED -> "Aceptado";
+                case PARTIALLY_ACCEPTED -> "Aceptado parcialmente";
+                case REJECTED -> "Rechazado";
+                case FAILED -> "Fallido";
+            };
+            String followUp = result.status() == com.sopes.api.model.ReceiptStatus.QUEUED
+                    ? " El mismo recibo se actualizará en Resultados de recepciones al terminar."
+                    : "";
+            addOperationFeedback(redirectAttributes, status,
+                    "Recibo " + result.receiptId() + ": " + result.message() + followUp,
+                    receiptAlertClass(result.status()));
         } catch (IllegalArgumentException e) {
-            redirectAttributes.addFlashAttribute("receiptMessage", e.getMessage());
-            redirectAttributes.addFlashAttribute("receiptStatus", "Datos inválidos");
+            addOperationFeedback(redirectAttributes, "Recepción no registrada", e.getMessage(), "alert-danger");
         }
         return "redirect:/";
     }
@@ -199,9 +233,14 @@ public class DashboardController {
             ServiceLevel level = ServiceLevel.valueOf(serviceLevel);
             java.util.List<Integer> units = quantities.stream().map(raw -> raw == null || raw.isBlank() ? 0 : Integer.parseInt(raw)).toList();
             var order = orderIntakeService.create(customerId, customerName, email, level, productCodes, units);
-            redirectAttributes.addFlashAttribute("orderMessage", "Pedido " + order.id() + " creado: " + order.status().getDisplayName() + ".");
+            String status = order.status() == com.sopes.api.model.OrderStatus.QUEUED
+                    ? "Pedido aceptado · en cola" : "Pedido aceptado · espera inventario";
+            String variant = order.status() == com.sopes.api.model.OrderStatus.QUEUED
+                    ? "alert-success" : "alert-warning";
+            addOperationFeedback(redirectAttributes, status,
+                    "Pedido " + order.id() + " creado. El seguimiento muestra su estado actual.", variant);
         } catch (IllegalArgumentException e) {
-            redirectAttributes.addFlashAttribute("orderMessage", "No se creó el pedido: " + e.getMessage());
+            addOperationFeedback(redirectAttributes, "Pedido rechazado", e.getMessage(), "alert-danger");
         }
         return "redirect:/";
     }

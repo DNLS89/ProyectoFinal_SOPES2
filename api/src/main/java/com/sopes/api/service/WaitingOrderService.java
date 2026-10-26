@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Registro central de pedidos y cola visible; no inicia procesamiento. */
+/** Mantiene estados y ordena la cola visible; el despachador reclama pedidos desde aquí. */
 @Service
 public class WaitingOrderService {
     private final Map<String, CustomerOrder> orders = new LinkedHashMap<>();
@@ -36,6 +36,7 @@ public class WaitingOrderService {
     }
 
     public synchronized void reconsider(InventoryService inventory) {
+        // Solo se reactivan pedidos con todas sus líneas disponibles para evitar reclamos parciales.
         for (var entry : new ArrayList<>(orders.entrySet())) {
             CustomerOrder order = entry.getValue();
             if (order.status() == OrderStatus.WAITING_FOR_STOCK
@@ -63,11 +64,16 @@ public class WaitingOrderService {
 
     public synchronized List<CustomerOrder> findAll() { return List.copyOf(orders.values()); }
 
+    public synchronized List<CustomerOrder> findByCustomerId(String customerId) {
+        return orders.values().stream().filter(order -> order.customer().id().equals(customerId)).toList();
+    }
+
     public synchronized List<CustomerOrder> findActiveOrders() {
         return orders.values().stream().filter(order -> order.status() == OrderStatus.PROCESSING).toList();
     }
 
     public synchronized ProcessingClaim claimNext(InventoryService inventory) {
+        // La reserva se hace junto con el reclamo para que dos workers no consuman las mismas unidades.
         for (CustomerOrder order : findWaitingQueue()) {
             InventoryReservation reservation = inventory.reserve(order);
             if (reservation == null) {
@@ -138,6 +144,7 @@ public class WaitingOrderService {
     }
 
     private Comparator<CustomerOrder> queueComparator() {
+        // Las tres políticas usan antigüedad como desempate para que el orden sea reproducible.
         Comparator<CustomerOrder> fifo = Comparator.comparing(CustomerOrder::queueEnteredAt)
                 .thenComparing(CustomerOrder::id);
         return switch (policy) {
