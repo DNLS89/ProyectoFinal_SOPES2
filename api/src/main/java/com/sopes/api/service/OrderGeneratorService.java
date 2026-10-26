@@ -1,10 +1,13 @@
 package com.sopes.api.service;
 
 import com.sopes.api.model.ServiceLevel;
+import com.sopes.api.model.OperationalError;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 import java.util.List;
+import java.time.Instant;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -12,6 +15,7 @@ public class OrderGeneratorService {
     private final OrderIntakeService intake;
     private final InventoryService inventory;
     private final ProductCatalog products;
+    private final List<OperationalError> recentErrors = new CopyOnWriteArrayList<>();
     private volatile Thread generatorThread;
     private volatile int intervalSeconds = 5;
 
@@ -58,10 +62,20 @@ public class OrderGeneratorService {
                 generateOne();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-            } catch (RuntimeException ignored) {
-                // Un pedido inválido no debe terminar el generador.
+            } catch (RuntimeException e) {
+                recordError(e);
+                return;
             }
         }
+    }
+
+    public List<OperationalError> findRecentErrors() { return List.copyOf(recentErrors); }
+
+    private void recordError(RuntimeException error) {
+        String message = error.getMessage() == null || error.getMessage().isBlank()
+                ? error.getClass().getSimpleName() : error.getMessage();
+        recentErrors.add(0, new OperationalError("Generador", "", message, Instant.now()));
+        while (recentErrors.size() > 20) recentErrors.remove(recentErrors.size() - 1);
     }
 
     private void generateOne() {

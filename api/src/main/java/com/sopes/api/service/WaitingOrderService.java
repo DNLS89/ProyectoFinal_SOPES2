@@ -111,6 +111,14 @@ public class WaitingOrderService {
         }
     }
 
+    public synchronized void block(ProcessingClaim claim, InventoryService inventory) {
+        inventory.release(claim.reservation());
+        CustomerOrder current = orders.get(claim.order().id());
+        if (current != null && current.status() == OrderStatus.PROCESSING) {
+            orders.put(current.id(), current.withStatus(OrderStatus.BLOCKED, current.queueEnteredAt()));
+        }
+    }
+
     public synchronized OrderStatistics statistics() {
         int total = orders.size();
         int queued = (int) orders.values().stream().filter(order -> order.status() == OrderStatus.QUEUED).count();

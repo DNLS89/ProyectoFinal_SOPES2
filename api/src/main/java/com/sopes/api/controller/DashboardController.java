@@ -3,6 +3,7 @@ package com.sopes.api.controller;
 import com.sopes.api.model.ReceiptRequest;
 import com.sopes.api.model.ReceiptResult;
 import com.sopes.api.model.QueuePolicy;
+import com.sopes.api.model.OperationalError;
 import com.sopes.api.model.ServiceLevel;
 import com.sopes.api.service.InventoryService;
 import com.sopes.api.service.MerchandiseCatalog;
@@ -96,6 +97,7 @@ public class DashboardController {
         model.addAttribute("lots", inventoryService.findLots());
         model.addAttribute("pendingReceipts", receivingService.getPendingCount());
         model.addAttribute("receiptResults", receivingService.findRecentResults());
+        model.addAttribute("recentErrors", recentErrors());
         return "dashboard";
     }
 
@@ -120,7 +122,7 @@ public class DashboardController {
                         entry -> entry.getKey().code(), java.util.Map.Entry::getValue)))).toList(),
                 inventoryService.findProductInventory(productCatalog.findAll()),
                 receivingService.getPendingCount(), receivingService.findRecentResults(), conflictView,
-                comparisonService.latest());
+                comparisonService.latest(), recentErrors());
     }
 
     private OrderView orderView(com.sopes.api.model.CustomerOrder order) {
@@ -152,13 +154,23 @@ public class DashboardController {
                                      java.util.List<LotView> lots,
                                      java.util.List<com.sopes.api.model.ProductInventory> productInventory,
                                      int pendingReceipts, java.util.List<com.sopes.api.model.ReceiptResult> receiptResults,
-                                     ConflictView conflict, SchedulingComparisonService.ComparisonSnapshot comparison) { }
+                                     ConflictView conflict, SchedulingComparisonService.ComparisonSnapshot comparison,
+                                     java.util.List<OperationalError> recentErrors) { }
+
+    private java.util.List<OperationalError> recentErrors() {
+        return java.util.stream.Stream.concat(orderProcessingService.findRecentErrors().stream(),
+                        orderGeneratorService.findRecentErrors().stream())
+                .sorted(java.util.Comparator.comparing(OperationalError::occurredAt).reversed())
+                .limit(20).toList();
+    }
 
     @PostMapping("/receipts")
-    public String submitReceipt(@RequestParam String productCode,
-                                @RequestParam String quantity,
+    public String submitReceipt(@RequestParam(required = false) String productCode,
+                                @RequestParam(required = false) String quantity,
                                 RedirectAttributes redirectAttributes) {
         try {
+            if (productCode == null || productCode.isBlank()) throw new IllegalArgumentException("Seleccione un producto.");
+            if (quantity == null || quantity.isBlank()) throw new IllegalArgumentException("Indique la cantidad recibida.");
             var product = productCatalog.findByCode(productCode);
             int units = Integer.parseInt(quantity);
             ReceiptResult result = receivingService.submit(new ReceiptRequest(product.code(), product.merchandiseType(), units));
@@ -175,11 +187,15 @@ public class DashboardController {
     public String submitOrder(@RequestParam(required = false) String customerId,
                               @RequestParam(required = false) String customerName,
                               @RequestParam(required = false) String email,
-                              @RequestParam String serviceLevel,
-                              @RequestParam java.util.List<String> productCodes,
-                              @RequestParam java.util.List<String> quantities,
+                              @RequestParam(required = false) String serviceLevel,
+                              @RequestParam(required = false) java.util.List<String> productCodes,
+                              @RequestParam(required = false) java.util.List<String> quantities,
                               RedirectAttributes redirectAttributes) {
         try {
+            if (serviceLevel == null || serviceLevel.isBlank()) throw new IllegalArgumentException("Seleccione un nivel de servicio.");
+            if (productCodes == null || quantities == null || productCodes.isEmpty() || productCodes.size() != quantities.size()) {
+                throw new IllegalArgumentException("Seleccione productos e indique una cantidad para cada uno.");
+            }
             ServiceLevel level = ServiceLevel.valueOf(serviceLevel);
             java.util.List<Integer> units = quantities.stream().map(raw -> raw == null || raw.isBlank() ? 0 : Integer.parseInt(raw)).toList();
             var order = orderIntakeService.create(customerId, customerName, email, level, productCodes, units);

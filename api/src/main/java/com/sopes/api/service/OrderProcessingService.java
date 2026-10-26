@@ -1,11 +1,14 @@
 package com.sopes.api.service;
 
 import com.sopes.api.model.CustomerOrder;
+import com.sopes.api.model.OperationalError;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.time.Instant;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -17,6 +20,7 @@ public class OrderProcessingService {
     private final WaitingOrderService orders;
     private final InventoryService inventory;
     private final SharedResourceService resources;
+    private final List<OperationalError> recentErrors = new CopyOnWriteArrayList<>();
     private final ThreadPoolExecutor workers = new ThreadPoolExecutor(WORKER_COUNT, WORKER_COUNT,
             0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(MAX_PENDING_TASKS), runnable -> {
         Thread thread = new Thread(runnable, "redxela-order-worker");
@@ -56,6 +60,7 @@ public class OrderProcessingService {
             try {
                 workers.execute(task);
             } catch (RuntimeException e) {
+                if (running) recordError("Despachador", claim.order().id(), e);
                 task.restore();
                 pauseBriefly();
             }
@@ -72,7 +77,7 @@ public class OrderProcessingService {
 
     private void process(WaitingOrderService.ProcessingClaim claim) {
         SharedResourceService.Lease lease = null;
-        boolean completed = false;
+        boolean settled = false;
         try {
             lease = resources.acquire(claim.order());
             orders.markStarted(claim.order().id());
@@ -87,19 +92,33 @@ public class OrderProcessingService {
                 orders.updateProgress(claim.order().id(), progress, remaining);
             }
             orders.complete(claim, inventory);
-            completed = true;
+            settled = true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (RuntimeException e) {
-            // Si falla una operación, el pedido vuelve a cola y conserva sus existencias.
+            recordError("Procesamiento", claim.order().id(), e);
+            try {
+                orders.block(claim, inventory);
+                settled = true;
+            } catch (RuntimeException recoveryError) {
+                recordError("Recuperación", claim.order().id(), recoveryError);
+            }
         } finally {
             if (lease != null) lease.close();
-            if (!completed) orders.returnToQueue(claim, inventory);
+            if (!settled) orders.returnToQueue(claim, inventory);
         }
     }
 
     public List<CustomerOrder> findActiveOrders() { return orders.findActiveOrders(); }
     public List<SharedResourceService.ResourceState> resourceSnapshot() { return resources.snapshot(); }
+    public List<OperationalError> findRecentErrors() { return List.copyOf(recentErrors); }
+
+    private void recordError(String source, String reference, RuntimeException error) {
+        String message = error.getMessage() == null || error.getMessage().isBlank()
+                ? error.getClass().getSimpleName() : error.getMessage();
+        recentErrors.add(0, new OperationalError(source, reference, message, Instant.now()));
+        while (recentErrors.size() > 20) recentErrors.remove(recentErrors.size() - 1);
+    }
 
     @PreDestroy
     public void shutdown() {

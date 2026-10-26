@@ -57,6 +57,18 @@
                     <li th:if="${#lists.isEmpty(completedOrders)}" class="text-secondary">Aún no hay pedidos completados.</li></ul>
             </div>
         </section>
+        <section class="card border-danger mb-4">
+            <div class="card-body">
+                <h2 class="h4">Errores recientes</h2>
+                <div class="table-responsive"><table class="table table-sm mb-0">
+                    <thead><tr><th>Hora</th><th>Área</th><th>Referencia</th><th>Detalle</th></tr></thead>
+                    <tbody id="operational-error-rows"><tr th:each="error : ${recentErrors}">
+                        <td th:text="${error.occurredAt}">Hora</td><td th:text="${error.source}">Área</td>
+                        <td th:text="${error.reference}">Referencia</td><td th:text="${error.message}">Detalle</td>
+                    </tr><tr th:if="${#lists.isEmpty(recentErrors)}"><td colspan="4" class="text-secondary">No hay errores recientes.</td></tr></tbody>
+                </table></div>
+            </div>
+        </section>
         <section class="card border-warning mb-4">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
@@ -389,6 +401,11 @@
                 const row = document.createElement('tr');
                 cell(row, result.receiptId); cell(row, receiptStatusNames[result.status] || result.status); cell(row, result.acceptedUnits); cell(row, result.message); return row;
             }, 'Sin recepciones procesadas.', 4);
+            setRows('operational-error-rows', state.recentErrors, error => {
+                const row = document.createElement('tr');
+                cell(row, formatTime(error.occurredAt)); cell(row, error.source);
+                cell(row, error.reference); cell(row, error.message); return row;
+            }, 'No hay errores recientes.', 4);
             setText('pending-receipts', state.pendingReceipts);
             const conflict = state.conflict;
             setText('conflict-message', conflict.message);

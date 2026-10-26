@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class ReceivingService {
     private static final int QUEUE_CAPACITY = 100;
+    private static final int RESULT_HISTORY_LIMIT = 200;
     private final BlockingQueue<QueuedReceipt> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
     private final List<ReceiptResult> recentResults = new CopyOnWriteArrayList<>();
     private final AtomicBoolean running = new AtomicBoolean();
@@ -43,8 +44,12 @@ public class ReceivingService {
         consumer.start();
     }
 
-    public ReceiptResult submit(ReceiptRequest request) {
+    public synchronized ReceiptResult submit(ReceiptRequest request) {
         String id = "REC-" + UUID.randomUUID();
+        if (!running.get()) {
+            return new ReceiptResult(id, ReceiptStatus.REJECTED, request.quantity(), 0,
+                    "El servicio de recepción está detenido; el recibo no fue aceptado.", Instant.now(), java.util.Map.of());
+        }
         QueuedReceipt receipt = new QueuedReceipt(id, request);
         try {
             // El tiempo acotado da oportunidad al consumidor y evita bloquear la respuesta web.
@@ -70,15 +75,16 @@ public class ReceivingService {
                 try {
                     ReceiptResult result;
                     try {
+                        if (!running.get()) throw new InterruptedException("Cierre del servicio");
                         ReceiptResult stored = storeWithScanner(queued);
                         result = new ReceiptResult(queued.id(), stored.status(), stored.requestedUnits(),
                                 stored.acceptedUnits(), stored.message(), stored.processedAt(), stored.allocations());
+                    } catch (InterruptedException e) {
+                        result = failedReceipt(queued, "El recibo aceptado no se procesó por el cierre del servicio.");
                     } catch (RuntimeException e) {
-                        result = new ReceiptResult(queued.id(), ReceiptStatus.FAILED, queued.request().quantity(), 0,
-                                "Error procesando el recibo: " + e.getMessage(), Instant.now(), java.util.Map.of());
+                        result = failedReceipt(queued, "Error procesando el recibo: " + describe(e));
                     }
-                    recentResults.add(0, result);
-                    if (recentResults.size() > 50) recentResults.remove(recentResults.size() - 1);
+                    addResult(result);
                     if (result.acceptedUnits() > 0) waitingOrders.reconsider(inventory);
                 } finally {
                     inFlight.decrementAndGet();
@@ -89,33 +95,44 @@ public class ReceivingService {
         }
     }
 
-    private ReceiptResult storeWithScanner(QueuedReceipt queued) {
-        while (true) {
-            try (SharedResourceService.Lease ignored = resources.acquire(queued.id(), List.of("BARCODE_SCANNER"))) {
-                return inventory.store(queued.request());
-            } catch (InterruptedException e) {
-                // El recibo ya salió de la cola; se reintenta para no perderlo durante el cierre.
-            }
+    private ReceiptResult storeWithScanner(QueuedReceipt queued) throws InterruptedException {
+        try (SharedResourceService.Lease ignored = resources.acquire(queued.id(), List.of("BARCODE_SCANNER"))) {
+            return inventory.store(queued.request());
         }
+    }
+
+    private ReceiptResult failedReceipt(QueuedReceipt queued, String message) {
+        return new ReceiptResult(queued.id(), ReceiptStatus.FAILED, queued.request().quantity(), 0,
+                message, Instant.now(), java.util.Map.of());
+    }
+
+    private void addResult(ReceiptResult result) {
+        recentResults.add(0, result);
+        while (recentResults.size() > RESULT_HISTORY_LIMIT) recentResults.remove(recentResults.size() - 1);
+    }
+
+    private String describe(RuntimeException e) {
+        return e.getMessage() == null || e.getMessage().isBlank() ? e.getClass().getSimpleName() : e.getMessage();
     }
 
     public int getPendingCount() { return queue.size() + inFlight.get(); }
     public List<ReceiptResult> findRecentResults() { return List.copyOf(recentResults); }
 
     @PreDestroy
-    public void stop() {
+    public synchronized void stop() {
         running.set(false);
         if (consumer == null) return;
-        try {
-            consumer.join(5_000);
-            if (consumer.isAlive()) {
+        consumer.interrupt();
+        boolean interrupted = false;
+        while (consumer.isAlive()) {
+            try {
+                consumer.join();
+            } catch (InterruptedException e) {
+                interrupted = true;
                 consumer.interrupt();
-                consumer.join(1_000);
             }
-        } catch (InterruptedException e) {
-            consumer.interrupt();
-            Thread.currentThread().interrupt();
         }
+        if (interrupted) Thread.currentThread().interrupt();
     }
 
     private record QueuedReceipt(String id, ReceiptRequest request) { }
