@@ -36,6 +36,7 @@ public class SharedResourceService {
     }
 
     public Lease acquire(String ownerId, Collection<String> resourceCodes) throws InterruptedException {
+        // Un orden global de adquisición evita ciclos entre operaciones que comparten varios permisos.
         List<String> codes = resourceCodes.stream().distinct().sorted().toList();
         List<String> acquired = new ArrayList<>();
         try {
@@ -48,6 +49,7 @@ public class SharedResourceService {
             }
             return new Lease(ownerId, acquired);
         } catch (InterruptedException | RuntimeException e) {
+            // Si falla una adquisición parcial, se liberan los permisos antes de propagar el problema.
             release(ownerId, acquired);
             throw e;
         }
@@ -90,6 +92,7 @@ public class SharedResourceService {
         public synchronized void close() {
             if (closed) return;
             closed = true;
+            // El cierre idempotente permite liberar desde finally sin duplicar permisos.
             release(orderId, acquiredCodes);
         }
     }

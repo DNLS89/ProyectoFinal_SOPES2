@@ -36,6 +36,7 @@ public class InventoryService {
     }
 
     public synchronized ReceiptResult store(ReceiptRequest request) {
+        // Un solo bloqueo mantiene alineados capacidad total, ocupación por ubicación y lotes creados.
         int accepted = Math.min(request.quantity(), warehouse.getCapacityUnits() - storedUnits);
         Map<WarehouseLocation, Integer> allocations = new LinkedHashMap<>();
         int remaining = accepted;
@@ -122,6 +123,7 @@ public class InventoryService {
     }
 
     public synchronized InventoryReservation reserve(CustomerOrder order) {
+        // Se valida y descuenta bajo el mismo monitor para que dos órdenes no reserven las mismas unidades.
         Map<StockKey, Integer> required = requiredStock(order.lines());
         if (required.entrySet().stream().anyMatch(entry -> getAvailable(entry.getKey()) < entry.getValue())) return null;
 
@@ -154,6 +156,7 @@ public class InventoryService {
     }
 
     public synchronized void release(InventoryReservation reservation) {
+        // Una reserva activa se restaura una sola vez; así los reintentos no duplican disponibilidad.
         InventoryReservation active = activeReservations.remove(reservation.id());
         if (active == null) return;
         active.allocationsByLot().forEach((lotId, locations) -> locations.forEach((code, units) ->
@@ -161,6 +164,7 @@ public class InventoryService {
     }
 
     public synchronized void complete(InventoryReservation reservation) {
+        // Al completar, el stock reservado sale tanto de la disponibilidad como de la ocupación física.
         InventoryReservation active = activeReservations.remove(reservation.id());
         if (active == null) return;
         active.allocationsByLot().forEach((lotId, locations) -> locations.forEach((code, units) -> {

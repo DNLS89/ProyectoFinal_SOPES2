@@ -38,14 +38,20 @@ public class OrderGeneratorService {
 
     public synchronized void stop() {
         Thread thread = generatorThread;
-        generatorThread = null;
         if (thread == null) return;
         thread.interrupt();
-        try {
-            thread.join(2_000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        boolean interrupted = false;
+        // Se conserva la referencia hasta confirmar que el generador ya no puede crear órdenes.
+        while (thread.isAlive()) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                interrupted = true;
+                thread.interrupt();
+            }
         }
+        if (generatorThread == thread) generatorThread = null;
+        if (interrupted) Thread.currentThread().interrupt();
     }
 
     public boolean isRunning() {

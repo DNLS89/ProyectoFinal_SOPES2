@@ -79,6 +79,7 @@ public class OrderProcessingService {
         SharedResourceService.Lease lease = null;
         boolean settled = false;
         try {
+            // La reserva de inventario ya se hizo al reclamar; los permisos cubren solo el trabajo activo.
             lease = resources.acquire(claim.order());
             orders.markStarted(claim.order().id());
             long totalMillis = Math.max(1, claim.order().getTotalUnits()) * 500L;
@@ -104,6 +105,7 @@ public class OrderProcessingService {
                 recordError("Recuperación", claim.order().id(), recoveryError);
             }
         } finally {
+            // Cada salida, incluso por interrupción, devuelve permisos y recupera la orden si quedó pendiente.
             if (lease != null) lease.close();
             if (!settled) orders.returnToQueue(claim, inventory);
         }
@@ -123,30 +125,65 @@ public class OrderProcessingService {
     @PreDestroy
     public void shutdown() {
         running = false;
+        boolean interrupted = false;
+        String failure = null;
         if (dispatcher != null) {
             dispatcher.interrupt();
             try {
                 dispatcher.join(2_000);
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                interrupted = true;
+            }
+            if (dispatcher.isAlive()) {
+                failure = "El despachador de órdenes no terminó dentro del plazo.";
             }
         }
+        // Primero se da tiempo al trabajo activo para completar antes de interrumpirlo.
         workers.shutdown();
         try {
             if (!workers.awaitTermination(5, TimeUnit.SECONDS)) {
-                List<Runnable> pending = workers.shutdownNow();
-                for (Runnable runnable : pending) {
-                    if (runnable instanceof OrderProcessingService.OrderTask task) task.restore();
+                // El cierre forzado interrumpe el trabajo activo y devuelve las tareas que nunca iniciaron.
+                restorePending(workers.shutdownNow());
+                if (!awaitAfterForce(interrupted)) {
+                    failure = appendFailure(failure, "Los trabajadores de órdenes no terminaron tras el cierre forzado.");
                 }
-                workers.awaitTermination(2, TimeUnit.SECONDS);
             }
         } catch (InterruptedException e) {
-            List<Runnable> pending = workers.shutdownNow();
-            for (Runnable runnable : pending) {
-                if (runnable instanceof OrderProcessingService.OrderTask task) task.restore();
+            interrupted = true;
+            restorePending(workers.shutdownNow());
+            if (!awaitAfterForce(interrupted)) {
+                failure = appendFailure(failure, "Los trabajadores de órdenes no terminaron tras la interrupción del cierre.");
             }
-            Thread.currentThread().interrupt();
         }
+        if (interrupted) Thread.currentThread().interrupt();
+        if (failure != null) throw new IllegalStateException(failure);
+    }
+
+    private boolean awaitAfterForce(boolean interruptedBefore) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        boolean interrupted = interruptedBefore;
+        while (!workers.isTerminated()) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) break;
+            try {
+                workers.awaitTermination(remaining, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                interrupted = true;
+                restorePending(workers.shutdownNow());
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+        return workers.isTerminated();
+    }
+
+    private void restorePending(List<Runnable> pending) {
+        for (Runnable runnable : pending) {
+            if (runnable instanceof OrderProcessingService.OrderTask task) task.restore();
+        }
+    }
+
+    private String appendFailure(String current, String message) {
+        return current == null ? message : current + " " + message;
     }
 
     private final class OrderTask implements Runnable {
