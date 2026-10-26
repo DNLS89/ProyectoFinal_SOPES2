@@ -1,6 +1,5 @@
 package com.sopes.api.service;
 
-import com.sopes.api.model.OrderLine;
 import com.sopes.api.model.ServiceLevel;
 import org.springframework.stereotype.Service;
 
@@ -12,14 +11,14 @@ import java.util.concurrent.ThreadLocalRandom;
 public class OrderGeneratorService {
     private final OrderIntakeService intake;
     private final InventoryService inventory;
-    private final MerchandiseCatalog catalog;
+    private final ProductCatalog products;
     private volatile Thread generatorThread;
     private volatile int intervalSeconds = 5;
 
-    public OrderGeneratorService(OrderIntakeService intake, InventoryService inventory, MerchandiseCatalog catalog) {
+    public OrderGeneratorService(OrderIntakeService intake, InventoryService inventory, ProductCatalog products) {
         this.intake = intake;
         this.inventory = inventory;
-        this.catalog = catalog;
+        this.products = products;
     }
 
     public synchronized void start(int intervalSeconds) {
@@ -67,20 +66,22 @@ public class OrderGeneratorService {
 
     private void generateOne() {
         var lots = inventory.findLots();
-        OrderLine line;
+        var product = products.findByCode("SKU-001");
         if (lots.isEmpty()) {
-            line = new OrderLine("SIM-001", "Producto de simulación", catalog.findAll().get(0), 1);
+            product = products.findByCode("SKU-001");
         } else {
-            var lot = lots.get(ThreadLocalRandom.current().nextInt(lots.size()));
-            var type = catalog.findByCode(lot.merchandiseTypeCode());
-            int available = inventory.getProductStock(lot.productCode(), type);
-            line = new OrderLine(lot.productCode(), "Producto " + lot.productCode(), type, Math.max(1, Math.min(available, 1 + ThreadLocalRandom.current().nextInt(3))));
+            var lot = lots.stream().filter(item -> products.findAll().stream().anyMatch(p -> p.code().equals(item.productCode())))
+                    .findAny().orElse(null);
+            if (lot != null) product = products.findByCode(lot.productCode());
         }
         ServiceLevel[] levels = ServiceLevel.values();
         ServiceLevel level = levels[ThreadLocalRandom.current().nextInt(levels.length)];
-        String customer = "Cliente simulado " + ThreadLocalRandom.current().nextInt(1, 10_000);
-        intake.create(customer, "sim" + ThreadLocalRandom.current().nextInt(1, 1_000_000) + "@redxela.local",
-                level, List.of(line.productCode()), List.of(line.productName()), List.of(line.merchandiseType().code()), List.of(line.quantity()));
+        int customerNumber = ThreadLocalRandom.current().nextInt(1, 11);
+        String customer = "Cliente simulado " + customerNumber;
+        int available = inventory.getProductStock(product.code(), product.merchandiseType());
+        int quantity = available > 0 ? ThreadLocalRandom.current().nextInt(1, Math.min(available, 3) + 1) : 1;
+        intake.create(null, customer, "sim" + customerNumber + "@redxela.local", level,
+                List.of(product.code()), List.of(quantity));
     }
 
     @PreDestroy

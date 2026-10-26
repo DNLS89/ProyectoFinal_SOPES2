@@ -14,6 +14,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
@@ -22,13 +23,16 @@ public class ReceivingService {
     private final BlockingQueue<QueuedReceipt> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
     private final List<ReceiptResult> recentResults = new CopyOnWriteArrayList<>();
     private final AtomicBoolean running = new AtomicBoolean();
+    private final AtomicInteger inFlight = new AtomicInteger();
     private final InventoryService inventory;
     private final WaitingOrderService waitingOrders;
+    private final SharedResourceService resources;
     private Thread consumer;
 
-    public ReceivingService(InventoryService inventory, WaitingOrderService waitingOrders) {
+    public ReceivingService(InventoryService inventory, WaitingOrderService waitingOrders, SharedResourceService resources) {
         this.inventory = inventory;
         this.waitingOrders = waitingOrders;
+        this.resources = resources;
     }
 
     @PostConstruct
@@ -62,25 +66,40 @@ public class ReceivingService {
             try {
                 QueuedReceipt queued = queue.poll(200, TimeUnit.MILLISECONDS);
                 if (queued == null) continue;
-                ReceiptResult result;
+                inFlight.incrementAndGet();
                 try {
-                    ReceiptResult stored = inventory.store(queued.request());
-                    result = new ReceiptResult(queued.id(), stored.status(), stored.requestedUnits(),
-                            stored.acceptedUnits(), stored.message(), stored.processedAt(), stored.allocations());
-                } catch (RuntimeException e) {
-                    result = new ReceiptResult(queued.id(), ReceiptStatus.FAILED, queued.request().quantity(), 0,
-                            "Error procesando el recibo: " + e.getMessage(), Instant.now(), java.util.Map.of());
+                    ReceiptResult result;
+                    try {
+                        ReceiptResult stored = storeWithScanner(queued);
+                        result = new ReceiptResult(queued.id(), stored.status(), stored.requestedUnits(),
+                                stored.acceptedUnits(), stored.message(), stored.processedAt(), stored.allocations());
+                    } catch (RuntimeException e) {
+                        result = new ReceiptResult(queued.id(), ReceiptStatus.FAILED, queued.request().quantity(), 0,
+                                "Error procesando el recibo: " + e.getMessage(), Instant.now(), java.util.Map.of());
+                    }
+                    recentResults.add(0, result);
+                    if (recentResults.size() > 50) recentResults.remove(recentResults.size() - 1);
+                    if (result.acceptedUnits() > 0) waitingOrders.reconsider(inventory);
+                } finally {
+                    inFlight.decrementAndGet();
                 }
-                recentResults.add(0, result);
-                if (recentResults.size() > 50) recentResults.remove(recentResults.size() - 1);
-                if (result.acceptedUnits() > 0) waitingOrders.reconsider(inventory);
             } catch (InterruptedException e) {
-                if (!running.get()) break;
+                if (!running.get() && queue.isEmpty()) break;
             }
         }
     }
 
-    public int getPendingCount() { return queue.size(); }
+    private ReceiptResult storeWithScanner(QueuedReceipt queued) {
+        while (true) {
+            try (SharedResourceService.Lease ignored = resources.acquire(queued.id(), List.of("BARCODE_SCANNER"))) {
+                return inventory.store(queued.request());
+            } catch (InterruptedException e) {
+                // El recibo ya salió de la cola; se reintenta para no perderlo durante el cierre.
+            }
+        }
+    }
+
+    public int getPendingCount() { return queue.size() + inFlight.get(); }
     public List<ReceiptResult> findRecentResults() { return List.copyOf(recentResults); }
 
     @PreDestroy

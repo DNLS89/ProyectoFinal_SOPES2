@@ -30,7 +30,7 @@ public class WaitingOrderService {
         boolean stocked = inventory.hasStock(lines);
         OrderStatus status = stocked ? OrderStatus.QUEUED : OrderStatus.WAITING_FOR_STOCK;
         CustomerOrder order = new CustomerOrder("ORD-" + UUID.randomUUID(), customer, level, lines,
-                status, now, stocked ? now : null, now, null, null, 0, 0);
+                status, now, stocked ? now : null, now, null, null, 0, 0, 0, false, false);
         orders.put(order.id(), order);
         return order;
     }
@@ -88,6 +88,13 @@ public class WaitingOrderService {
         }
     }
 
+    public synchronized void markStarted(String orderId) {
+        CustomerOrder current = orders.get(orderId);
+        if (current != null && current.status() == OrderStatus.PROCESSING && current.startedAt() == null) {
+            orders.put(orderId, current.withProcessingStart(Instant.now()));
+        }
+    }
+
     public synchronized void complete(ProcessingClaim claim, InventoryService inventory) {
         inventory.complete(claim.reservation());
         CustomerOrder current = orders.get(claim.order().id());
@@ -100,7 +107,7 @@ public class WaitingOrderService {
         inventory.release(claim.reservation());
         CustomerOrder current = orders.get(claim.order().id());
         if (current != null && current.status() == OrderStatus.PROCESSING) {
-            orders.put(current.id(), current.withStatus(OrderStatus.QUEUED, Instant.now()));
+            orders.put(current.id(), current.withStatus(OrderStatus.QUEUED, current.queueEnteredAt()));
         }
     }
 
@@ -110,13 +117,16 @@ public class WaitingOrderService {
         int waiting = (int) orders.values().stream().filter(order -> order.status() == OrderStatus.WAITING_FOR_STOCK).count();
         int completed = (int) orders.values().stream().filter(order -> order.status() == OrderStatus.COMPLETED).count();
         int units = orders.values().stream().mapToInt(CustomerOrder::getTotalUnits).sum();
-        double averageWait = orders.values().stream().filter(order -> order.queueEnteredAt() != null)
-                .mapToLong(order -> java.time.Duration.between(order.createdAt(), order.queueEnteredAt()).toSeconds())
+        double averageWait = orders.values().stream().filter(CustomerOrder::waitTargetMeasured)
+                .mapToLong(CustomerOrder::queueWaitSeconds)
                 .average().orElse(0);
         double averageProcessing = orders.values().stream().filter(order -> order.startedAt() != null && order.completedAt() != null)
                 .mapToLong(order -> java.time.Duration.between(order.startedAt(), order.completedAt()).toSeconds())
                 .average().orElse(0);
-        return new OrderStatistics(total, queued, waiting, completed, units, averageWait, averageProcessing);
+        long targetEvaluated = orders.values().stream().filter(CustomerOrder::waitTargetMeasured).count();
+        long targetMet = orders.values().stream().filter(order -> order.waitTargetMeasured() && order.waitTargetMet()).count();
+        return new OrderStatistics(total, queued, waiting, completed, units, averageWait, averageProcessing,
+                targetMet, targetEvaluated);
     }
 
     private Comparator<CustomerOrder> queueComparator() {
@@ -133,6 +143,7 @@ public class WaitingOrderService {
     public record ProcessingClaim(CustomerOrder order, InventoryReservation reservation) { }
 
     public record OrderStatistics(int totalOrders, int queuedOrders, int waitingForStock, int completedOrders,
-                                  int totalUnits, double averageQueueEntryDelaySeconds,
-                                  double averageProcessingSeconds) { }
+                                  int totalUnits, double averageWaitSeconds,
+                                  double averageProcessingSeconds, long waitTargetsMet,
+                                  long waitTargetsEvaluated) { }
 }

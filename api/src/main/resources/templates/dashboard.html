@@ -18,17 +18,18 @@
         <section class="row g-3 mb-4">
             <div class="col-md-4"><div class="card h-100"><div class="card-body">
                 <h2 class="h5">Estado del sistema</h2>
-                <p class="mb-1">Pedidos registrados: <strong th:text="${orderStatistics.totalOrders}">0</strong></p>
-                <p class="mb-1">Completados: <strong th:text="${orderStatistics.completedOrders}">0</strong></p>
-                <p class="mb-1">En cola: <strong th:text="${orderStatistics.queuedOrders}">0</strong></p>
-                <p class="mb-1">Esperando inventario: <strong th:text="${orderStatistics.waitingForStock}">0</strong></p>
-                <p class="mb-1">Unidades solicitadas: <strong th:text="${orderStatistics.totalUnits}">0</strong></p>
-                <p class="mb-1">Procesamiento medio (s): <strong th:text="${#numbers.formatDecimal(orderStatistics.averageProcessingSeconds, 1, 1)}">0.0</strong></p>
-                <p class="mb-0">Demora media hasta entrar a cola (s): <strong th:text="${#numbers.formatDecimal(orderStatistics.averageQueueEntryDelaySeconds, 1, 1)}">0.0</strong></p>
+                <p class="mb-1">Pedidos registrados: <strong id="stat-total" th:text="${orderStatistics.totalOrders}">0</strong></p>
+                <p class="mb-1">Completados: <strong id="stat-completed" th:text="${orderStatistics.completedOrders}">0</strong></p>
+                <p class="mb-1">En cola: <strong id="stat-queued" th:text="${orderStatistics.queuedOrders}">0</strong></p>
+                <p class="mb-1">Esperando inventario: <strong id="stat-stock-wait" th:text="${orderStatistics.waitingForStock}">0</strong></p>
+                <p class="mb-1">Unidades solicitadas: <strong id="stat-units" th:text="${orderStatistics.totalUnits}">0</strong></p>
+                <p class="mb-1">Procesamiento medio (s): <strong id="stat-processing" th:text="${#numbers.formatDecimal(orderStatistics.averageProcessingSeconds, 1, 1)}">0.0</strong></p>
+                <p class="mb-1">Espera media hasta iniciar (s): <strong id="stat-wait" th:text="${#numbers.formatDecimal(orderStatistics.averageWaitSeconds, 1, 1)}">0.0</strong></p>
+                <p class="mb-0">Objetivos de espera cumplidos: <strong id="stat-sla" th:text="|${orderStatistics.waitTargetsMet} / ${orderStatistics.waitTargetsEvaluated}|">0 / 0</strong></p>
             </div></div></div>
             <div class="col-md-4"><div class="card h-100"><div class="card-body">
                 <h2 class="h5">Almacén</h2>
-                <p th:text="|Existencias: ${storedUnits} / ${warehouseCapacity} unidades|">Capacidad</p>
+                <p>Existencias: <span id="stored-units" th:text="${storedUnits}">0</span> / <span id="warehouse-capacity" th:text="${warehouseCapacity}">1000</span> unidades</p>
                 <p class="mb-0" th:text="|Ubicaciones físicas: ${#lists.size(locations)}|">Ubicaciones</p>
             </div></div></div>
             <div class="col-md-4"><div class="card h-100"><div class="card-body">
@@ -40,18 +41,19 @@
             <div class="card-body">
                 <h2 class="h4">Pedidos activos</h2>
                 <div class="table-responsive"><table class="table table-striped mb-0">
-                    <thead><tr><th>Pedido</th><th>Cliente</th><th>Unidades</th><th>Inicio</th><th>Progreso</th><th>Restante estimado</th></tr></thead>
-                    <tbody><tr th:each="order : ${activeOrders}">
+                    <thead><tr><th>Pedido</th><th>Cliente</th><th>Unidades</th><th>Inicio</th><th>Progreso</th><th>Restante estimado</th><th>Objetivo de espera</th></tr></thead>
+                    <tbody id="active-order-rows"><tr th:each="order : ${activeOrders}">
                         <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
                         <td th:text="${order.totalUnits}">0</td><td th:text="${order.startedAt}">Inicio</td>
                         <td><div class="progress" role="progressbar" th:attr="aria-valuenow=${order.progressPercent},aria-valuemin=0,aria-valuemax=100">
                             <div class="progress-bar" th:style="|width: ${order.progressPercent}%|" th:text="|${order.progressPercent}%|"></div></div></td>
                         <td th:text="|${order.estimatedRemainingSeconds} s|">0 s</td>
-                    </tr><tr th:if="${#lists.isEmpty(activeOrders)}"><td colspan="6" class="text-secondary">No hay pedidos en proceso.</td></tr></tbody>
+                        <td th:text="${order.waitTargetMeasured} ? (${order.waitTargetMet} ? 'Cumplido' : 'Vencido') : 'Pendiente'"></td>
+                    </tr><tr th:if="${#lists.isEmpty(activeOrders)}"><td colspan="7" class="text-secondary">No hay pedidos en proceso.</td></tr></tbody>
                 </table></div>
                 <h3 class="h5 mt-4">Pedidos completados recientemente</h3>
-                <ul class="mb-0"><li th:each="order, iter : ${completedOrders}" th:if="${iter.index < 10}"
-                    th:text="|${order.id} — ${order.totalUnits} unidades, ${order.completedAt}|">Pedido</li>
+                <ul id="completed-order-list" class="mb-0"><li th:each="order, iter : ${completedOrders}" th:if="${iter.index < 10}"
+                    th:text="|${order.id} — ${order.totalUnits} unidades, ${order.completedAt}, objetivo ${order.waitTargetMet ? 'cumplido' : 'vencido'}|">Pedido</li>
                     <li th:if="${#lists.isEmpty(completedOrders)}" class="text-secondary">Aún no hay pedidos completados.</li></ul>
             </div>
         </section>
@@ -60,27 +62,27 @@
                 <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                     <div>
                         <h2 class="h4">Demostración de conflicto de recursos</h2>
-                        <p class="mb-1">Escenario aislado con semáforos propios; no detiene pedidos reales. Se cancela automáticamente en dos minutos.</p>
+                        <p class="mb-1">Conflicto simulado con semáforos propios; no involucra pedidos activos ni permisos del pool real. Se cancela automáticamente en dos minutos.</p>
                     </div>
                     <form method="post" th:action="@{/conflict/start}">
-                        <button class="btn btn-warning" type="submit" th:disabled="${conflict.active}">Provocar conflicto</button>
+                        <button id="conflict-start" class="btn btn-warning" type="submit" th:disabled="${conflict.active}">Provocar conflicto simulado</button>
                     </form>
                 </div>
-                <div class="alert alert-secondary mt-3 mb-3" th:text="${conflict.message}">Estado del conflicto</div>
+                <div id="conflict-message" class="alert alert-secondary mt-3 mb-3" th:text="${conflict.message}">Estado del conflicto</div>
                 <div th:if="${conflict.operationA != null}">
-                    <p th:text="${conflict.explanation}">Explicación</p>
+                    <p id="conflict-explanation" th:text="${conflict.explanation}">Explicación</p>
                     <div class="table-responsive"><table class="table table-bordered align-middle">
                         <thead><tr><th>Operación</th><th>Retiene</th><th>Solicita</th><th>Estado</th></tr></thead>
                         <tbody>
                             <tr><td th:text="${conflict.operationA.name}">Operación A</td>
                                 <td th:text="${conflict.operationA.holds}">Recurso</td><td th:text="${conflict.operationA.requests}">Recurso</td>
-                                <td th:text="${conflict.operationA.status}">Bloqueada</td></tr>
+                                <td id="conflict-a-status" th:text="${conflict.operationA.status}">Bloqueada</td></tr>
                             <tr><td th:text="${conflict.operationB.name}">Operación B</td>
                                 <td th:text="${conflict.operationB.holds}">Recurso</td><td th:text="${conflict.operationB.requests}">Recurso</td>
-                                <td th:text="${conflict.operationB.status}">Bloqueada</td></tr>
+                                <td id="conflict-b-status" th:text="${conflict.operationB.status}">Bloqueada</td></tr>
                         </tbody>
                     </table></div>
-                    <div th:if="${conflict.active}" class="d-flex gap-2 flex-wrap">
+                    <div id="conflict-actions" th:if="${conflict.active}" class="d-flex gap-2 flex-wrap">
                         <form method="post" th:action="@{/conflict/resolve}">
                             <input type="hidden" name="winner" value="A">
                             <button class="btn btn-success" type="submit">Permitir que opere A</button>
@@ -93,7 +95,7 @@
                             <button class="btn btn-outline-danger" type="submit">Cancelar escenario</button>
                         </form>
                     </div>
-                    <p class="small text-secondary mt-2 mb-0" th:if="${conflict.active}" th:text="|Vence: ${conflict.expiresAt}|">Vencimiento</p>
+                    <p id="conflict-expiry" class="small text-secondary mt-2 mb-0" th:if="${conflict.active}" th:text="|Vence: ${conflict.expiresAt}|">Vencimiento</p>
                 </div>
             </div>
         </section>
@@ -103,19 +105,23 @@
                     <h2 class="h4">Crear pedido</h2>
                     <form method="post" th:action="@{/orders}" class="vstack gap-3">
                         <div class="row g-2">
-                            <div class="col-md-6"><label for="customerName" class="form-label">Cliente</label><input class="form-control" id="customerName" name="customerName" required maxlength="100"></div>
-                            <div class="col-md-6"><label for="email" class="form-label">Correo electrónico</label><input class="form-control" type="email" id="email" name="email" required></div>
+                            <div class="col-12"><label for="customerId" class="form-label">Cuenta del cliente</label>
+                                <select class="form-select" id="customerId" name="customerId" onchange="toggleNewCustomer()">
+                                    <option value="NEW">Crear o buscar cuenta por correo</option>
+                                    <option th:each="customer : ${customers}" th:value="${customer.id}" th:text="|${customer.name} — ${customer.email}|"></option>
+                                </select></div>
+                            <div class="col-md-6 new-customer-field"><label for="customerName" class="form-label">Nombre para nueva cuenta</label><input class="form-control" id="customerName" name="customerName" maxlength="100"></div>
+                            <div class="col-md-6 new-customer-field"><label for="email" class="form-label">Correo electrónico</label><input class="form-control" type="email" id="email" name="email"></div>
                         </div>
                         <div><label for="serviceLevel" class="form-label">Nivel de servicio</label>
                             <select class="form-select" id="serviceLevel" name="serviceLevel" required>
-                                <option th:each="level : ${serviceLevels}" th:value="${level.name()}" th:text="|${level.level} - ${level.displayName}|"></option>
+                                <option th:each="level : ${serviceLevels}" th:value="${level.name()}" th:text="|${level.level} - ${level.displayName} (${level.targetWaitMinutes} min objetivo)|"></option>
                             </select></div>
                         <div class="table-responsive"><table class="table table-sm align-middle mb-0">
-                            <thead><tr><th>Código</th><th>Producto</th><th>Mercancía</th><th>Unidades</th></tr></thead>
+                            <thead><tr><th>Producto del catálogo</th><th>Mercancía</th><th>Unidades</th></tr></thead>
                             <tbody id="orderLines"><tr>
-                                <td><input class="form-control" name="productCodes" required maxlength="40"></td>
-                                <td><input class="form-control" name="productNames" required maxlength="100"></td>
-                                <td><select class="form-select" name="merchandiseTypeCodes" required><option th:each="type : ${merchandiseTypes}" th:value="${type.code}" th:text="${type.name}"></option></select></td>
+                                <td><select class="form-select order-product" name="productCodes" required><option value="">Seleccione producto</option><option th:each="product : ${products}" th:value="${product.code}" th:attr="data-type=${product.merchandiseType.name}" th:text="|${product.code} — ${product.name}|"></option></select></td>
+                                <td><span class="product-type">Seleccione producto</span></td>
                                 <td><input class="form-control" type="number" name="quantities" min="1" value="1" required></td>
                             </tr></tbody>
                         </table></div>
@@ -141,7 +147,28 @@
                             <option th:each="policy : ${queuePolicies}" th:value="${policy.name()}" th:text="${policy.displayName}" th:selected="${policy == queuePolicy}"></option>
                         </select><button class="btn btn-outline-primary" type="submit">Aplicar</button>
                     </form>
+                    <form method="post" th:action="@{/orders/compare}" class="mt-3">
+                        <button class="btn btn-outline-dark" type="submit">Comparar políticas con la cola actual</button>
+                    </form>
                 </div></div>
+            </div>
+        </section>
+        <section class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Comparación controlada de políticas</h2>
+                <p id="comparison-caption" th:if="${comparison.workloadSize > 0}" th:text="|Cola capturada ${comparison.capturedAt}; ${comparison.workloadSize} pedidos, ${comparison.simulatedWorkers} trabajadores simulados.|">Carga</p>
+                <p id="comparison-empty" th:if="${comparison.workloadSize == 0}" class="text-secondary">Aún no se ha comparado una cola con pedidos elegibles.</p>
+                <p class="small text-secondary">Las tres políticas usan exactamente la misma fotografía de pedidos y cuatro trabajadores idénticos. La proyección usa 0.5 s por unidad y no modela contención de recursos compartidos.</p>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Política</th><th>Pedidos</th><th>Espera media total (s)</th><th>Procesamiento medio (s)</th><th>Finalización media desde cola (s)</th><th>Objetivos cumplidos</th></tr></thead>
+                    <tbody id="comparison-results"><tr th:each="result : ${comparison.results}">
+                        <td th:text="${result.policy.displayName}">Política</td><td th:text="${result.orders}">0</td>
+                        <td th:text="${#numbers.formatDecimal(result.averageWaitSeconds, 1, 1)}">0.0</td>
+                        <td th:text="${#numbers.formatDecimal(result.averageProcessingSeconds, 1, 1)}">0.0</td>
+                        <td th:text="${#numbers.formatDecimal(result.averageCompletionSeconds, 1, 1)}">0.0</td>
+                        <td th:text="|${result.targetsMet} / ${result.targetsEvaluated}|">0 / 0</td>
+                    </tr></tbody>
+                </table></div>
             </div>
         </section>
         <section class="card mb-4">
@@ -150,14 +177,14 @@
                 <p th:text="|Ordenada por: ${queuePolicy.displayName}|">Política</p>
                 <div class="table-responsive"><table class="table table-striped mb-0">
                     <thead><tr><th>Pedido</th><th>Cliente</th><th>Servicio</th><th>Unidades</th><th>Estado</th><th>En cola desde</th></tr></thead>
-                    <tbody><tr th:each="order : ${waitingQueue}">
+                    <tbody id="waiting-queue-rows"><tr th:each="order : ${waitingQueue}">
                         <td th:text="${order.id}">ID</td><td th:text="${order.customer.name}">Cliente</td>
                         <td th:text="${order.serviceLevel.displayName}">Servicio</td><td th:text="${order.totalUnits}">0</td>
                         <td th:text="${order.status.displayName}">Estado</td><td th:text="${order.queueEnteredAt}">Fecha</td>
                     </tr><tr th:if="${#lists.isEmpty(waitingQueue)}"><td colspan="6" class="text-secondary">La cola está vacía.</td></tr></tbody>
                 </table></div>
                 <h3 class="h5 mt-4">Esperando inventario</h3>
-                <ul class="mb-0"><li th:each="order : ${stockWaitOrders}" th:text="|${order.id} — ${order.customer.name}, ${order.totalUnits} unidades|">Pedido</li>
+                <ul id="stock-wait-list" class="mb-0"><li th:each="order : ${stockWaitOrders}" th:text="|${order.id} — ${order.customer.name}, ${order.totalUnits} unidades|">Pedido</li>
                     <li th:if="${#lists.isEmpty(stockWaitOrders)}" class="text-secondary">No hay pedidos esperando existencias.</li></ul>
             </div>
         </section>
@@ -166,11 +193,9 @@
                 <div class="card h-100"><div class="card-body">
                     <h2 class="h4">Registrar recepción</h2>
                     <form method="post" th:action="@{/receipts}" class="vstack gap-3">
-                        <div><label class="form-label" for="productCode">Código de producto</label>
-                            <input class="form-control" id="productCode" name="productCode" required maxlength="40"></div>
-                        <div><label class="form-label" for="merchandiseTypeCode">Tipo de mercancía</label>
-                            <select class="form-select" id="merchandiseTypeCode" name="merchandiseTypeCode" required>
-                                <option th:each="type : ${merchandiseTypes}" th:value="${type.code}" th:text="${type.name}"></option>
+                        <div><label class="form-label" for="productCode">Producto del catálogo</label>
+                            <select class="form-select" id="productCode" name="productCode" required><option value="">Seleccione producto</option>
+                                <option th:each="product : ${products}" th:value="${product.code}" th:text="|${product.code} — ${product.name}|"></option>
                             </select></div>
                         <div><label class="form-label" for="quantity">Unidades recibidas</label>
                             <input class="form-control" type="number" id="quantity" name="quantity" min="1" required></div>
@@ -181,10 +206,10 @@
             <div class="col-lg-7">
                 <div class="card h-100"><div class="card-body">
                     <h2 class="h4">Inventario por ubicación</h2>
-                    <p th:text="|Recepciones pendientes: ${pendingReceipts}|">Pendientes</p>
+                    <p>Recepciones pendientes: <span id="pending-receipts" th:text="${pendingReceipts}">0</span></p>
                     <div class="table-responsive"><table class="table table-sm">
                         <thead><tr><th>Ubicación</th><th>Unidades ocupadas</th></tr></thead>
-                        <tbody><tr th:each="entry : ${locationStock}">
+                        <tbody id="location-stock-rows"><tr th:each="entry : ${locationStock}">
                             <td th:text="${entry.key}">A-01</td><td th:text="${entry.value}">0</td>
                         </tr></tbody>
                     </table></div>
@@ -193,10 +218,19 @@
         </section>
         <section class="card mb-4">
             <div class="card-body">
-                <h2 class="h4">Lotes almacenados</h2>
+                <h2 class="h4">Disponibilidad por producto</h2>
+                <div class="table-responsive"><table class="table table-striped mb-0">
+                    <thead><tr><th>Producto</th><th>Disponible</th><th>Reservado</th><th>En almacén</th><th>Ubicaciones actuales</th></tr></thead>
+                    <tbody id="product-stock-rows"><tr th:each="stock : ${productInventory}">
+                        <td th:text="|${stock.product.code} — ${stock.product.name}|">Producto</td>
+                        <td th:text="${stock.availableUnits}">0</td><td th:text="${stock.reservedUnits}">0</td>
+                        <td th:text="${stock.storedUnits}">0</td><td th:text="${stock.unitsByLocation}">Ubicaciones</td>
+                    </tr></tbody>
+                </table></div>
+                <h2 class="h4 mt-4">Lotes almacenados</h2>
                 <div class="table-responsive"><table class="table table-striped mb-0">
                     <thead><tr><th>Producto</th><th>Mercancía</th><th>Unidades</th><th>Ubicaciones asignadas</th></tr></thead>
-                    <tbody><tr th:each="lot : ${lots}">
+                    <tbody id="lot-rows"><tr th:each="lot : ${lots}">
                         <td th:text="${lot.productCode}">Producto</td>
                         <td th:text="${lot.merchandiseTypeCode}">Tipo</td>
                         <td th:text="${lot.quantity}">0</td>
@@ -212,7 +246,7 @@
                 <h2 class="h4">Resultado de recepciones</h2>
                 <div class="table-responsive"><table class="table table-sm mb-0">
                     <thead><tr><th>Recibo</th><th>Resultado</th><th>Aceptadas</th><th>Detalle</th></tr></thead>
-                    <tbody><tr th:each="result : ${receiptResults}">
+                    <tbody id="receipt-result-rows"><tr th:each="result : ${receiptResults}">
                         <td th:text="${result.receiptId}">ID</td><td th:text="${result.status.displayName}">Estado</td>
                         <td th:text="${result.acceptedUnits}">0</td><td th:text="${result.message}">Detalle</td>
                     </tr><tr th:if="${#lists.isEmpty(receiptResults)}"><td colspan="4" class="text-secondary">Sin recepciones procesadas.</td></tr></tbody>
@@ -225,7 +259,7 @@
                 <div class="table-responsive">
                     <table class="table table-striped mb-0">
                         <thead><tr><th>Recurso</th><th>Capacidad</th><th>En uso</th><th>Pedidos que lo usan</th></tr></thead>
-                        <tbody><tr th:each="state : ${resourceStates}">
+                        <tbody id="resource-rows"><tr th:each="state : ${resourceStates}">
                             <td th:text="${state.resource.name}">Recurso</td>
                             <td th:text="${state.resource.capacity}">0</td>
                             <td th:text="${state.inUse}">0</td>
@@ -252,12 +286,163 @@
         </section>
     </main>
     <script>
+        const formatTime = value => value ? new Date(value).toLocaleString() : '—';
+        const cell = (row, value) => {
+            const td = document.createElement('td');
+            td.textContent = value ?? '';
+            row.appendChild(td);
+            return td;
+        };
+        const setText = (id, value) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        };
+        function setRows(id, rows, build, emptyText, columns) {
+            const body = document.getElementById(id);
+            if (!body) return;
+            body.replaceChildren();
+            if (!rows.length) {
+                const row = document.createElement('tr');
+                const td = cell(row, emptyText);
+                td.colSpan = columns;
+                td.className = 'text-secondary';
+                body.appendChild(row);
+                return;
+            }
+            rows.forEach(item => body.appendChild(build(item)));
+        }
+        function renderOrder(order, mode) {
+            const row = document.createElement('tr');
+            if (mode === 'active') {
+                cell(row, order.id); cell(row, order.customerName); cell(row, order.units);
+                cell(row, formatTime(order.startedAt));
+                const progressCell = document.createElement('td');
+                const progress = document.createElement('div');
+                progress.className = 'progress';
+                progress.setAttribute('role', 'progressbar');
+                progress.setAttribute('aria-valuenow', order.progressPercent);
+                progress.setAttribute('aria-valuemin', '0'); progress.setAttribute('aria-valuemax', '100');
+                const bar = document.createElement('div'); bar.className = 'progress-bar';
+                bar.style.width = order.progressPercent + '%'; bar.textContent = order.progressPercent + '%';
+                progress.appendChild(bar); progressCell.appendChild(progress); row.appendChild(progressCell);
+                cell(row, order.remainingSeconds + ' s');
+                cell(row, !order.waitTargetMeasured ? 'Pendiente' : order.waitTargetMet ? 'Cumplido' : 'Vencido');
+            } else if (mode === 'queue') {
+                cell(row, order.id); cell(row, order.customerName);
+                cell(row, `${order.serviceLevel} (${order.targetWaitMinutes} min)`);
+                cell(row, order.units); cell(row, order.status); cell(row, formatTime(order.queueEnteredAt));
+            } else {
+                cell(row, `${order.id} — ${order.units} unidades, ${formatTime(order.completedAt)}, objetivo ${order.waitTargetMet ? 'cumplido' : 'vencido'}`);
+            }
+            return row;
+        }
+        function renderLiveState(state) {
+            const stats = state.statistics;
+            setText('stat-total', stats.totalOrders); setText('stat-completed', stats.completedOrders);
+            setText('stat-queued', stats.queuedOrders); setText('stat-stock-wait', stats.waitingForStock);
+            setText('stat-units', stats.totalUnits); setText('stat-processing', Number(stats.averageProcessingSeconds).toFixed(1));
+            setText('stat-wait', Number(stats.averageWaitSeconds).toFixed(1));
+            setText('stat-sla', `${stats.waitTargetsMet} / ${stats.waitTargetsEvaluated}`);
+            setText('stored-units', state.storedUnits); setText('warehouse-capacity', state.capacityUnits);
+            setRows('active-order-rows', state.active, order => renderOrder(order, 'active'), 'No hay pedidos en proceso.', 7);
+            setRows('waiting-queue-rows', state.queue, order => renderOrder(order, 'queue'), 'La cola está vacía.', 6);
+            const completedList = document.getElementById('completed-order-list');
+            if (completedList) {
+                completedList.replaceChildren();
+                (state.completed.length ? state.completed.slice(0, 10) : [null]).forEach(order => {
+                    const li = document.createElement('li');
+                    li.textContent = order ? `${order.id} — ${order.units} unidades, ${formatTime(order.completedAt)}, objetivo ${order.waitTargetMet ? 'cumplido' : 'vencido'}` : 'Aún no hay pedidos completados.';
+                    if (!order) li.className = 'text-secondary';
+                    completedList.appendChild(li);
+                });
+            }
+            const waitingList = document.getElementById('stock-wait-list');
+            if (waitingList) {
+                waitingList.replaceChildren();
+                (state.stockWait.length ? state.stockWait : [null]).forEach(order => {
+                    const li = document.createElement('li');
+                    li.textContent = order ? `${order.id} — ${order.customerName}, ${order.units} unidades` : 'No hay pedidos esperando existencias.';
+                    if (!order) li.className = 'text-secondary';
+                    waitingList.appendChild(li);
+                });
+            }
+            setRows('resource-rows', state.resources, resource => {
+                const row = document.createElement('tr');
+                cell(row, resource.resource.name); cell(row, resource.resource.capacity); cell(row, resource.inUse);
+                cell(row, resource.orderIds.join(', ') || 'Nadie'); return row;
+            }, 'Sin recursos configurados.', 4);
+            setRows('location-stock-rows', Object.entries(state.locationStock), entry => {
+                const row = document.createElement('tr'); cell(row, entry[0]); cell(row, entry[1]); return row;
+            }, 'Sin ubicaciones.', 2);
+            setRows('product-stock-rows', state.productInventory, stock => {
+                const row = document.createElement('tr');
+                cell(row, `${stock.product.code} — ${stock.product.name}`); cell(row, stock.availableUnits);
+                cell(row, stock.reservedUnits); cell(row, stock.storedUnits); cell(row, JSON.stringify(stock.unitsByLocation)); return row;
+            }, 'Sin productos.', 5);
+            setRows('lot-rows', state.lots, lot => {
+                const row = document.createElement('tr');
+                cell(row, lot.productCode); cell(row, lot.merchandiseTypeCode); cell(row, lot.quantity);
+                cell(row, Object.entries(lot.allocations).map(([location, units]) => `${location}: ${units}`).join(', ')); return row;
+            }, 'Aún no hay lotes.', 4);
+            const receiptStatusNames = {QUEUED: 'En cola', ACCEPTED: 'Aceptada', PARTIALLY_ACCEPTED: 'Aceptada parcialmente', REJECTED: 'Rechazada', FAILED: 'Error de procesamiento'};
+            setRows('receipt-result-rows', state.receiptResults, result => {
+                const row = document.createElement('tr');
+                cell(row, result.receiptId); cell(row, receiptStatusNames[result.status] || result.status); cell(row, result.acceptedUnits); cell(row, result.message); return row;
+            }, 'Sin recepciones procesadas.', 4);
+            setText('pending-receipts', state.pendingReceipts);
+            const conflict = state.conflict;
+            setText('conflict-message', conflict.message);
+            setText('conflict-explanation', conflict.explanation || '');
+            if (conflict.operationA) setText('conflict-a-status', conflict.operationA.status);
+            if (conflict.operationB) setText('conflict-b-status', conflict.operationB.status);
+            const start = document.getElementById('conflict-start');
+            if (start) start.disabled = conflict.active;
+            const actions = document.getElementById('conflict-actions');
+            if (actions) actions.hidden = !conflict.active;
+            const expiry = document.getElementById('conflict-expiry');
+            if (expiry) { expiry.hidden = !conflict.active; expiry.textContent = conflict.active ? `Vence: ${formatTime(conflict.expiresAt)}` : ''; }
+            const comparison = state.comparison;
+            const policyNames = {SERVICE_PRIORITY: 'Prioridad de servicio', LONGEST_WAIT: 'Mayor tiempo de espera', SMALLEST_WORKLOAD: 'Menor cantidad de unidades'};
+            setRows('comparison-results', comparison.results, result => {
+                const row = document.createElement('tr');
+                cell(row, policyNames[result.policy] || result.policy); cell(row, result.orders);
+                cell(row, Number(result.averageWaitSeconds).toFixed(1));
+                cell(row, Number(result.averageProcessingSeconds).toFixed(1));
+                cell(row, Number(result.averageCompletionSeconds).toFixed(1));
+                cell(row, `${result.targetsMet} / ${result.targetsEvaluated}`); return row;
+            }, 'Sin comparación calculada.', 6);
+        }
+        async function refreshSimulation() {
+            try {
+                const response = await fetch('/dashboard/state', {cache: 'no-store', headers: {'Accept': 'application/json'}});
+                if (response.ok) renderLiveState(await response.json());
+            } catch (error) {
+                // La siguiente actualización reintentará sin interrumpir los formularios.
+            }
+        }
+        window.setInterval(refreshSimulation, 2500);
+
+        function toggleNewCustomer() {
+            const creating = document.getElementById('customerId').value === 'NEW';
+            document.querySelectorAll('.new-customer-field').forEach(field => {
+                field.hidden = !creating;
+                field.querySelector('input').required = creating;
+            });
+        }
         function addOrderLine() {
             const first = document.querySelector('#orderLines tr');
             const row = first.cloneNode(true);
+            row.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
             row.querySelectorAll('input').forEach(input => input.value = input.name === 'quantities' ? '1' : '');
+            row.querySelector('.product-type').textContent = 'Tipo';
             document.getElementById('orderLines').appendChild(row);
         }
+        const orderLines = document.getElementById('orderLines');
+        orderLines.addEventListener('change', event => {
+            if (!event.target.matches('.order-product')) return;
+            event.target.closest('tr').querySelector('.product-type').textContent = event.target.selectedOptions[0]?.dataset.type || 'Tipo';
+        });
+        toggleNewCustomer();
     </script>
 </body>
 </html>

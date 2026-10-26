@@ -4,6 +4,8 @@ import com.sopes.api.model.MerchandiseType;
 import com.sopes.api.model.CustomerOrder;
 import com.sopes.api.model.InventoryReservation;
 import com.sopes.api.model.OrderLine;
+import com.sopes.api.model.Product;
+import com.sopes.api.model.ProductInventory;
 import com.sopes.api.model.ReceiptRequest;
 import com.sopes.api.model.ReceiptResult;
 import com.sopes.api.model.ReceiptStatus;
@@ -24,6 +26,7 @@ public class InventoryService {
     private final List<StockLot> lots = new ArrayList<>();
     private final Map<String, Integer> locationUse = new LinkedHashMap<>();
     private final Map<String, Map<String, Integer>> availableByLot = new LinkedHashMap<>();
+    private final Map<String, Map<String, Integer>> storedByLotLocation = new LinkedHashMap<>();
     private final Map<String, InventoryReservation> activeReservations = new LinkedHashMap<>();
     private int storedUnits;
 
@@ -54,6 +57,7 @@ public class InventoryService {
             Map<String, Integer> availableLocations = new LinkedHashMap<>();
             allocations.forEach((location, units) -> availableLocations.put(location.code(), units));
             availableByLot.put(id, availableLocations);
+            storedByLotLocation.put(id, new LinkedHashMap<>(availableLocations));
             storedUnits += accepted;
         }
 
@@ -68,11 +72,42 @@ public class InventoryService {
                 Instant.now(), byLocation);
     }
 
-    public synchronized List<StockLot> findLots() { return List.copyOf(lots); }
+    public synchronized List<StockLot> findLots() {
+        Map<String, WarehouseLocation> locations = new LinkedHashMap<>();
+        warehouse.findLocations().forEach(location -> locations.put(location.code(), location));
+        return lots.stream().map(lot -> {
+            Map<WarehouseLocation, Integer> allocations = new LinkedHashMap<>();
+            storedByLotLocation.getOrDefault(lot.id(), Map.of()).forEach((code, units) -> {
+                if (units > 0) allocations.put(locations.get(code), units);
+            });
+            int quantity = allocations.values().stream().mapToInt(Integer::intValue).sum();
+            return quantity == 0 ? null : new StockLot(lot.id(), lot.productCode(), lot.merchandiseTypeCode(), quantity, allocations);
+        }).filter(java.util.Objects::nonNull).toList();
+    }
     public synchronized int getStoredUnits() { return storedUnits; }
     public int getCapacityUnits() { return warehouse.getCapacityUnits(); }
 
     public synchronized Map<String, Integer> stockByLocation() { return Map.copyOf(locationUse); }
+
+    public synchronized List<ProductInventory> findProductInventory(List<Product> products) {
+        List<ProductInventory> result = new ArrayList<>();
+        for (Product product : products) {
+            int available = 0;
+            int stored = 0;
+            Map<String, Integer> byLocation = new LinkedHashMap<>();
+            for (StockLot lot : lots) {
+                if (!matches(lot, new StockKey(product.code(), product.merchandiseType().code()))) continue;
+                available += availableByLot.getOrDefault(lot.id(), Map.of()).values().stream()
+                        .mapToInt(Integer::intValue).sum();
+                storedByLotLocation.getOrDefault(lot.id(), Map.of()).forEach((location, units) -> {
+                    if (units > 0) byLocation.merge(location, units, Integer::sum);
+                });
+            }
+            stored = byLocation.values().stream().mapToInt(Integer::intValue).sum();
+            result.add(new ProductInventory(product, available, stored - available, stored, byLocation));
+        }
+        return List.copyOf(result);
+    }
 
     public synchronized int getProductStock(String productCode, MerchandiseType type) {
         return lots.stream().filter(lot -> lot.productCode().equals(productCode)
@@ -128,8 +163,12 @@ public class InventoryService {
     public synchronized void complete(InventoryReservation reservation) {
         InventoryReservation active = activeReservations.remove(reservation.id());
         if (active == null) return;
-        active.allocationsByLot().values().forEach(locations -> locations.forEach((code, units) ->
-                locationUse.compute(code, (ignored, current) -> current - units)));
+        active.allocationsByLot().forEach((lotId, locations) -> locations.forEach((code, units) -> {
+            locationUse.compute(code, (ignored, current) -> current - units);
+            Map<String, Integer> physical = storedByLotLocation.get(lotId);
+            int left = physical.get(code) - units;
+            if (left == 0) physical.remove(code); else physical.put(code, left);
+        }));
         int consumed = active.allocationsByLot().values().stream().flatMap(locations -> locations.values().stream())
                 .mapToInt(Integer::intValue).sum();
         storedUnits -= consumed;

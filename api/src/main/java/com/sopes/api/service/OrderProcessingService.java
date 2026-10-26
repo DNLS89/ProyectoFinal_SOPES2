@@ -75,6 +75,7 @@ public class OrderProcessingService {
         boolean completed = false;
         try {
             lease = resources.acquire(claim.order());
+            orders.markStarted(claim.order().id());
             long totalMillis = Math.max(1, claim.order().getTotalUnits()) * 500L;
             long elapsed = 0;
             while (elapsed < totalMillis) {

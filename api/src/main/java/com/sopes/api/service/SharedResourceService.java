@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
@@ -31,6 +32,11 @@ public class SharedResourceService {
         List<String> codes = order.lines().stream()
                 .flatMap(line -> line.merchandiseType().requiredResourceCodes().stream())
                 .distinct().sorted().toList();
+        return acquire(order.id(), codes);
+    }
+
+    public Lease acquire(String ownerId, Collection<String> resourceCodes) throws InterruptedException {
+        List<String> codes = resourceCodes.stream().distinct().sorted().toList();
         List<String> acquired = new ArrayList<>();
         try {
             for (String code : codes) {
@@ -38,11 +44,11 @@ public class SharedResourceService {
                 if (semaphore == null) throw new IllegalArgumentException("Recurso sin configurar: " + code);
                 semaphore.acquire();
                 acquired.add(code);
-                holders.get(code).add(order.id());
+                holders.get(code).add(ownerId);
             }
-            return new Lease(order.id(), acquired);
+            return new Lease(ownerId, acquired);
         } catch (InterruptedException | RuntimeException e) {
-            release(order.id(), acquired);
+            release(ownerId, acquired);
             throw e;
         }
     }
