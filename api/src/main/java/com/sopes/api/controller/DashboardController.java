@@ -8,6 +8,7 @@ import com.sopes.api.service.InventoryService;
 import com.sopes.api.service.MerchandiseCatalog;
 import com.sopes.api.service.OrderGeneratorService;
 import com.sopes.api.service.OrderIntakeService;
+import com.sopes.api.service.OrderProcessingService;
 import com.sopes.api.service.ReceivingService;
 import com.sopes.api.service.WarehouseConfiguration;
 import com.sopes.api.service.WaitingOrderService;
@@ -20,7 +21,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 
 @Controller
 public class DashboardController {
-    private final java.util.List<com.sopes.api.model.SharedResource> resources;
     private final MerchandiseCatalog merchandiseCatalog;
     private final WarehouseConfiguration warehouseConfiguration;
     private final InventoryService inventoryService;
@@ -28,16 +28,16 @@ public class DashboardController {
     private final WaitingOrderService orderService;
     private final OrderIntakeService orderIntakeService;
     private final OrderGeneratorService orderGeneratorService;
+    private final OrderProcessingService orderProcessingService;
 
-    public DashboardController(java.util.List<com.sopes.api.model.SharedResource> resources,
-                              MerchandiseCatalog merchandiseCatalog,
+    public DashboardController(MerchandiseCatalog merchandiseCatalog,
                               WarehouseConfiguration warehouseConfiguration,
                               InventoryService inventoryService,
                               ReceivingService receivingService,
                               WaitingOrderService orderService,
                               OrderIntakeService orderIntakeService,
-                              OrderGeneratorService orderGeneratorService) {
-        this.resources = resources;
+                              OrderGeneratorService orderGeneratorService,
+                              OrderProcessingService orderProcessingService) {
         this.merchandiseCatalog = merchandiseCatalog;
         this.warehouseConfiguration = warehouseConfiguration;
         this.inventoryService = inventoryService;
@@ -45,18 +45,23 @@ public class DashboardController {
         this.orderService = orderService;
         this.orderIntakeService = orderIntakeService;
         this.orderGeneratorService = orderGeneratorService;
+        this.orderProcessingService = orderProcessingService;
     }
 
     @GetMapping("/")
     public String dashboard(Model model) {
-        model.addAttribute("resources", resources);
         model.addAttribute("merchandiseTypes", merchandiseCatalog.findAll());
         model.addAttribute("warehouseCapacity", warehouseConfiguration.getCapacityUnits());
         model.addAttribute("locations", warehouseConfiguration.findLocations());
         var statistics = orderService.statistics();
         model.addAttribute("orderStatistics", statistics);
         model.addAttribute("orderCount", statistics.totalOrders());
-        model.addAttribute("activeOrderCount", statistics.queuedOrders() + statistics.waitingForStock());
+        model.addAttribute("activeOrderCount", statistics.queuedOrders() + statistics.waitingForStock()
+                + orderProcessingService.findActiveOrders().size());
+        model.addAttribute("completedOrders", orderService.findAll().stream()
+                .filter(order -> order.status() == com.sopes.api.model.OrderStatus.COMPLETED).toList());
+        model.addAttribute("activeOrders", orderProcessingService.findActiveOrders());
+        model.addAttribute("resourceStates", orderProcessingService.resourceSnapshot());
         model.addAttribute("waitingQueue", orderService.findWaitingQueue());
         model.addAttribute("stockWaitOrders", orderService.findWaitingForStock());
         model.addAttribute("queuePolicy", orderService.getPolicy());
