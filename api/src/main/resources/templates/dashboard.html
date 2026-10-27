@@ -163,6 +163,15 @@
                         <button class="btn btn-success" type="submit">Iniciar</button>
                     </form>
                     <form method="post" th:action="@{/generator/stop}"><button class="btn btn-outline-danger" type="submit">Detener</button></form>
+                    <h3 class="h6 mt-3">Últimos pedidos generados</h3>
+                    <div class="table-responsive"><table class="table table-sm mb-0">
+                        <thead><tr><th>Pedido</th><th>Servicio</th><th>Unidades</th><th>Creado</th><th>Estado</th></tr></thead>
+                        <tbody id="generated-order-rows"><tr th:each="order : ${generatedOrders}">
+                            <td th:text="${order.id}">ORD-...</td><td th:text="${order.serviceLevel}">Servicio</td>
+                            <td th:text="${order.units}">0</td><td th:text="${#temporals.format(order.createdAt, 'yyyy-MM-dd HH:mm:ss')}">Fecha</td>
+                            <td th:text="${order.status}">Estado</td>
+                        </tr><tr th:if="${#lists.isEmpty(generatedOrders)}"><td colspan="5" class="text-secondary">Aún no se han generado pedidos.</td></tr></tbody>
+                    </table></div>
                 </div></div>
                 <div class="card"><div class="card-body">
                     <h2 class="h5">Política de cola</h2>
@@ -434,6 +443,11 @@
             setRows('waiting-queue-rows', state.queue, order => renderOrder(order, 'queue'), 'La cola está vacía.', 6);
             setRows('completed-order-rows', state.completed.slice(0, 10), order => renderOrder(order, 'completed'),
                 'Aún no hay pedidos completados.', 7);
+            setRows('generated-order-rows', state.generatedOrders, order => {
+                const row = document.createElement('tr');
+                cell(row, order.id); cell(row, order.serviceLevel); cell(row, order.units);
+                cell(row, formatTime(order.createdAt)); cell(row, order.status); return row;
+            }, 'Aún no se han generado pedidos.', 5);
             const waitingList = document.getElementById('stock-wait-list');
             if (waitingList) {
                 waitingList.replaceChildren();

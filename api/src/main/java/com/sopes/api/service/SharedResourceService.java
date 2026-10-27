@@ -30,6 +30,7 @@ public class SharedResourceService {
     }
 
     public Lease acquire(CustomerOrder order) throws InterruptedException {
+        // Cada tipo de mercadería aporta recursos; la combinación se unifica antes de pedir permisos.
         List<String> codes = order.lines().stream()
                 .flatMap(line -> line.merchandiseType().requiredResourceCodes().stream())
                 .distinct().sorted().toList();
@@ -37,7 +38,7 @@ public class SharedResourceService {
     }
 
     public Lease acquire(String ownerId, Collection<String> resourceCodes) throws InterruptedException {
-        // Un orden global de adquisición evita ciclos entre operaciones que comparten varios permisos.
+        // Todo flujo pide recursos en el mismo orden global, evitando ciclos de espera entre órdenes concurrentes.
         List<String> codes = resourceCodes.stream().distinct().sorted().toList();
         List<String> acquired = new ArrayList<>();
         try {
@@ -70,6 +71,7 @@ public class SharedResourceService {
     }
 
     private void release(String orderId, List<String> codes) {
+        // La liberación inversa deshace la adquisición parcial y actualiza la vista de quién conserva cada permiso.
         for (int i = codes.size() - 1; i >= 0; i--) {
             String code = codes.get(i);
             holders.get(code).remove(orderId);

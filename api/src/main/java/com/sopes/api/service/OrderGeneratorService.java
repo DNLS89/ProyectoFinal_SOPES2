@@ -17,6 +17,7 @@ public class OrderGeneratorService {
     private final InventoryService inventory;
     private final ProductCatalog products;
     private final List<OperationalError> recentErrors = new CopyOnWriteArrayList<>();
+    private final List<String> recentGeneratedOrderIds = new CopyOnWriteArrayList<>();
     private volatile Thread generatorThread;
     private volatile int intervalSeconds = 5;
 
@@ -79,6 +80,8 @@ public class OrderGeneratorService {
 
     public List<OperationalError> findRecentErrors() { return List.copyOf(recentErrors); }
 
+    public List<String> findRecentGeneratedOrderIds() { return List.copyOf(recentGeneratedOrderIds); }
+
     private void recordError(RuntimeException error) {
         String message = error.getMessage() == null || error.getMessage().isBlank()
                 ? error.getClass().getSimpleName() : error.getMessage();
@@ -102,8 +105,10 @@ public class OrderGeneratorService {
         String customer = "Cliente simulado " + customerNumber;
         int available = inventory.getProductStock(product.code(), product.merchandiseType());
         int quantity = available > 0 ? ThreadLocalRandom.current().nextInt(1, Math.min(available, 3) + 1) : 1;
-        intake.create(null, customer, "sim" + customerNumber + "@redxela.local", level,
+        var order = intake.create(null, customer, "sim" + customerNumber + "@redxela.local", level,
                 List.of(product.code()), List.of(quantity));
+        recentGeneratedOrderIds.add(0, order.id());
+        while (recentGeneratedOrderIds.size() > 20) recentGeneratedOrderIds.remove(recentGeneratedOrderIds.size() - 1);
     }
 
     @PreDestroy

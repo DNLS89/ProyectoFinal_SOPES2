@@ -57,7 +57,7 @@ public class ResourceConflictService {
         String explanation = "A conserva " + forkliftName + " y solicita " + workerName
                 + "; B conserva " + workerName + " y solicita " + forkliftName
                 + ". Cada operación espera un recurso retenido por la otra.";
-        // El bloqueo se conserva como estado y permisos, sin dejar hilos esperando indefinidamente.
+        // El ciclo se representa con permisos privados y estado visible; no bloquea workers ni recursos de producción.
         current = new ConflictSnapshot(id, true, false, Instant.now(), Instant.now().plusSeconds(TIMEOUT_SECONDS),
                 first, second, explanation, "Conflicto reproducido con permisos aislados; no hay hilos bloqueados.", "");
 
@@ -251,7 +251,7 @@ public class ResourceConflictService {
 
     @PreDestroy
     public synchronized void shutdown() {
-        // El cierre invalida callbacks futuros y devuelve cualquier permiso aún retenido.
+        // El cierre invalida callbacks de la simulación y devuelve sus permisos aislados si aún están retenidos.
         if (current.active()) releaseHeld();
         waiting.clear();
         scheduler.shutdownNow();

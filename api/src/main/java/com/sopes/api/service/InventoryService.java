@@ -41,6 +41,7 @@ public class InventoryService {
         int accepted = Math.min(request.quantity(), warehouse.getCapacityUnits() - storedUnits);
         Map<WarehouseLocation, Integer> allocations = new LinkedHashMap<>();
         int remaining = accepted;
+        // El recorrido fijo reparte el lote si la primera ubicación no tiene espacio suficiente.
         for (WarehouseLocation location : warehouse.findLocations()) {
             int free = location.capacityUnits() - locationUse.get(location.code());
             int allocated = Math.min(free, remaining);
@@ -119,12 +120,13 @@ public class InventoryService {
     }
 
     public synchronized boolean hasStock(List<OrderLine> lines) {
+        // La consulta usa el mismo monitor que reservar para observar disponibilidad coherente.
         Map<StockKey, Integer> required = requiredStock(lines);
         return required.entrySet().stream().allMatch(entry -> getAvailable(entry.getKey()) >= entry.getValue());
     }
 
     public synchronized InventoryReservation reserve(CustomerOrder order) {
-        // Se valida y descuenta bajo el mismo monitor para que dos órdenes no reserven las mismas unidades.
+        // Validación y descuento son indivisibles: dos workers no pueden reclamar las mismas unidades.
         Map<StockKey, Integer> required = requiredStock(order.lines());
         if (required.entrySet().stream().anyMatch(entry -> getAvailable(entry.getKey()) < entry.getValue())) return null;
 
@@ -157,7 +159,7 @@ public class InventoryService {
     }
 
     public synchronized void release(InventoryReservation reservation) {
-        // Una reserva activa se restaura una sola vez; así los reintentos no duplican disponibilidad.
+        // Si el procesamiento se reintenta, se restaura la reserva activa una sola vez y no se duplica stock.
         InventoryReservation active = activeReservations.remove(reservation.id());
         if (active == null) return;
         active.allocationsByLot().forEach((lotId, locations) -> locations.forEach((code, units) ->
@@ -165,7 +167,7 @@ public class InventoryService {
     }
 
     public synchronized void complete(InventoryReservation reservation) {
-        // Al completar, el stock reservado sale tanto de la disponibilidad como de la ocupación física.
+        // Al completar, se consume la reserva y se libera ocupación física para mantener lotes y capacidad alineados.
         InventoryReservation active = activeReservations.remove(reservation.id());
         if (active == null) return;
         active.allocationsByLot().forEach((lotId, locations) -> locations.forEach((code, units) -> {

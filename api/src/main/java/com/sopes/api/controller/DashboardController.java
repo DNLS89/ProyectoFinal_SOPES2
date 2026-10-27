@@ -96,6 +96,7 @@ public class DashboardController {
         model.addAttribute("serviceLevels", ServiceLevel.values());
         model.addAttribute("generatorRunning", orderGeneratorService.isRunning());
         model.addAttribute("generatorInterval", orderGeneratorService.getIntervalSeconds());
+        model.addAttribute("generatedOrders", generatedOrderViews(orderService.findAll()));
         model.addAttribute("storedUnits", inventoryService.getStoredUnits());
         model.addAttribute("locationStock", inventoryService.stockByLocation());
         model.addAttribute("lots", inventoryService.findLots());
@@ -119,6 +120,7 @@ public class DashboardController {
                 orderProcessingService.findActiveOrders().stream().map(this::orderView).toList(),
                 allOrders.stream().filter(order -> order.status() == com.sopes.api.model.OrderStatus.COMPLETED)
                         .map(this::orderView).toList(),
+                generatedOrderViews(allOrders),
                 orderProcessingService.resourceSnapshot(), inventoryService.getStoredUnits(),
                 inventoryService.getCapacityUnits(), inventoryService.stockByLocation(),
                 inventoryService.findLots().stream().map(lot -> new LotView(lot.productCode(), lot.merchandiseTypeCode(),
@@ -132,10 +134,17 @@ public class DashboardController {
     private OrderView orderView(com.sopes.api.model.CustomerOrder order) {
         return new OrderView(order.id(), order.customer().name(), order.serviceLevel().getDisplayName(),
                 order.serviceLevel().getTargetWaitMinutes(), order.getTotalUnits(), order.status().getDisplayName(),
-                order.queueEnteredAt(), order.startedAt(), order.completedAt(), order.progressPercent(),
+                order.createdAt(), order.queueEnteredAt(), order.startedAt(), order.completedAt(), order.progressPercent(),
                 order.estimatedRemainingSeconds(), order.queueWaitSeconds(), order.waitTargetMeasured(), order.waitTargetMet(),
                 order.lines().stream().map(line -> new OrderLineView(line.productCode(), line.productName(),
                         line.merchandiseType().name(), line.quantity())).toList());
+    }
+
+    private java.util.List<OrderView> generatedOrderViews(java.util.List<com.sopes.api.model.CustomerOrder> allOrders) {
+        var ordersById = allOrders.stream().collect(java.util.stream.Collectors.toMap(
+                com.sopes.api.model.CustomerOrder::id, order -> order));
+        return orderGeneratorService.findRecentGeneratedOrderIds().stream()
+                .map(ordersById::get).filter(java.util.Objects::nonNull).map(this::orderView).toList();
     }
 
     private ConflictOperationView conflictOperation(ResourceConflictService.ConflictOperation operation) {
@@ -143,7 +152,7 @@ public class DashboardController {
     }
 
     public record OrderView(String id, String customerName, String serviceLevel, int targetWaitMinutes, int units,
-                            String status, java.time.Instant queueEnteredAt, java.time.Instant startedAt,
+                            String status, java.time.Instant createdAt, java.time.Instant queueEnteredAt, java.time.Instant startedAt,
                             java.time.Instant completedAt, int progressPercent, long remainingSeconds,
                             long queueWaitSeconds, boolean waitTargetMeasured, boolean waitTargetMet,
                             java.util.List<OrderLineView> lines) { }
@@ -157,7 +166,7 @@ public class DashboardController {
 
     public record LiveDashboardState(WaitingOrderService.OrderStatistics statistics, java.util.List<OrderView> queue,
                                      java.util.List<OrderView> stockWait, java.util.List<OrderView> active,
-                                     java.util.List<OrderView> completed,
+                                     java.util.List<OrderView> completed, java.util.List<OrderView> generatedOrders,
                                      java.util.List<com.sopes.api.service.SharedResourceService.ResourceState> resources,
                                      int storedUnits, int capacityUnits, java.util.Map<String, Integer> locationStock,
                                      java.util.List<LotView> lots,

@@ -77,7 +77,7 @@ public class ReceivingService {
     }
 
     private void consume() {
-        // FIFO conserva el orden de aceptación mientras el consumidor procesa a su propio ritmo.
+        // Un único consumidor aplica las recepciones en orden de aceptación y separa el formulario del inventario.
         while (running.get() || !queue.isEmpty()) {
             try {
                 QueuedReceipt queued = queue.poll(200, TimeUnit.MILLISECONDS);
@@ -107,6 +107,7 @@ public class ReceivingService {
     }
 
     private ReceiptResult storeWithScanner(QueuedReceipt queued) throws InterruptedException {
+        // Recepción y despacho electrónico comparten el lease; así el escáner único nunca se usa a la vez.
         try (SharedResourceService.Lease ignored = resources.acquire(queued.id(), List.of("BARCODE_SCANNER"))) {
             return inventory.store(queued.request());
         }
@@ -134,7 +135,7 @@ public class ReceivingService {
     public synchronized void stop() {
         running.set(false);
         if (consumer == null) return;
-        // Se interrumpe la espera de cola y se espera que el consumidor registre o cierre su trabajo actual.
+        // La interrupción despierta el sondeo; el join espera que el consumidor cierre su trabajo y registre el recibo.
         consumer.interrupt();
         boolean interrupted = false;
         while (consumer.isAlive()) {

@@ -47,7 +47,7 @@ public class OrderProcessingService {
     }
 
     private void dispatch() {
-        // El límite de tareas pendientes mantiene acotada la memoria si ingresan órdenes más rápido que el pool.
+        // Un despachador reclama pedidos y los reparte entre cuatro workers; el límite evita crecer sin control.
         while (running) {
             if (workers.getActiveCount() + workers.getQueue().size() >= WORKER_COUNT + MAX_PENDING_TASKS) {
                 pauseBriefly();
@@ -81,9 +81,10 @@ public class OrderProcessingService {
         SharedResourceService.Lease lease = null;
         boolean settled = false;
         try {
-            // El stock se reserva al reclamar y los permisos se adquieren antes de iniciar el trabajo.
+            // El stock ya quedó reservado al reclamar; aquí se esperan los permisos antes de marcar el inicio real.
             lease = resources.acquire(claim.order());
             orders.markStarted(claim.order().id());
+            // Medio segundo por unidad vincula la duración simulada con el tamaño del pedido.
             long totalMillis = Math.max(1, claim.order().getTotalUnits()) * 500L;
             long elapsed = 0;
             while (elapsed < totalMillis) {
@@ -107,7 +108,7 @@ public class OrderProcessingService {
                 recordError("Recuperación", claim.order().id(), recoveryError);
             }
         } finally {
-            // Cada salida, incluso por interrupción, devuelve permisos y recupera la orden si quedó pendiente.
+            // El lease devuelve recursos y una orden no asentada libera su stock y vuelve a quedar disponible.
             if (lease != null) lease.close();
             if (!settled) orders.returnToQueue(claim, inventory);
         }
@@ -129,7 +130,7 @@ public class OrderProcessingService {
         running = false;
         boolean interrupted = false;
         String failure = null;
-        // Se detiene primero el despachador para que no agregue tareas mientras cierran los workers.
+        // Se detiene primero al productor de tareas para que ningún reclamo compita con el cierre del pool.
         if (dispatcher != null) {
             dispatcher.interrupt();
             try {
@@ -141,7 +142,7 @@ public class OrderProcessingService {
                 failure = "El despachador de órdenes no terminó dentro del plazo.";
             }
         }
-        // Primero se da tiempo al trabajo activo para completar antes de interrumpirlo.
+        // El cierre ordenado permite terminar trabajos activos; el cierre forzado recupera los que no iniciaron.
         workers.shutdown();
         try {
             if (!workers.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -200,6 +201,7 @@ public class OrderProcessingService {
 
         private synchronized void restore() {
             if (restored) return;
+            // Dos rutas de cierre pueden recuperar esta tarea; el flag evita devolverla dos veces.
             restored = true;
             orders.returnToQueue(claim, inventory);
         }

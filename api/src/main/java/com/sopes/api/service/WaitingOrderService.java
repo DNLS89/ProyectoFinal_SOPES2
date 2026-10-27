@@ -54,6 +54,7 @@ public class WaitingOrderService {
     public synchronized QueuePolicy getPolicy() { return policy; }
 
     public synchronized List<CustomerOrder> findWaitingQueue() {
+        // La cola se deriva de los estados y se ordena por política; el monitor protege la vista frente a cambios concurrentes.
         return orders.values().stream().filter(order -> order.status() == OrderStatus.QUEUED)
                 .sorted(queueComparator()).toList();
     }
@@ -73,7 +74,7 @@ public class WaitingOrderService {
     }
 
     public synchronized ProcessingClaim claimNext(InventoryService inventory) {
-        // La reserva se hace junto con el reclamo para que dos workers no consuman las mismas unidades.
+        // El monitor serializa reclamos y la reserva atómica evita que dos workers tomen el mismo pedido o stock.
         for (CustomerOrder order : findWaitingQueue()) {
             InventoryReservation reservation = inventory.reserve(order);
             if (reservation == null) {
@@ -144,7 +145,7 @@ public class WaitingOrderService {
     }
 
     private Comparator<CustomerOrder> queueComparator() {
-        // Las tres políticas usan antigüedad como desempate para que el orden sea reproducible.
+        // No es una cola FIFO física: se ordena la vista por política y la antigüedad desempata de forma reproducible.
         Comparator<CustomerOrder> fifo = Comparator.comparing(CustomerOrder::queueEnteredAt)
                 .thenComparing(CustomerOrder::id);
         return switch (policy) {
